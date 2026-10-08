@@ -77,6 +77,21 @@ docker compose --profile https up -d --build
 O Caddy trata do certificado automaticamente. Os uploads em blocos de 50 MB também passam por
 proxies com limite de tamanho por pedido, como o Cloudflare (limite de 100 MB).
 
+### Link público sem abrir portas (Cloudflare Tunnel)
+
+Serve para um PC ou NAS no clube ou em casa, sem mexer no router.
+
+1. Cria uma conta gratuita na Cloudflare e adiciona o teu domínio.
+2. Em **Zero Trust → Networks → Tunnels**, cria um túnel e copia o token.
+3. Em *Public Hostname*, aponta `videos.meuclube.pt` para `http://videoteca:3000`.
+4. No `.env`, define `TUNNEL_TOKEN=...`, `SECURE_COOKIES=true` e `TRUST_PROXY=1`.
+5. Corre `docker compose --profile tunnel up -d --build`.
+
+Os blocos de upload de 50 MB ficam abaixo do limite de 100 MB por pedido da Cloudflare.
+
+Para um teste rápido sem domínio, corre `cloudflared tunnel --url http://localhost:3000`.
+Isto dá um link `https://….trycloudflare.com` temporário, que muda sempre que o comando é reiniciado.
+
 ## Correr sem Docker
 
 Requer Node.js ≥ 22.13 e `ffmpeg`/`ffprobe` no PATH.

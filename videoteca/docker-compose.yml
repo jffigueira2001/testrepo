@@ -28,5 +28,15 @@ services:
     depends_on:
       - videoteca
 
+  # Link público sem abrir portas no router (Cloudflare Tunnel).
+  # Ativar com: docker compose --profile tunnel up -d   (requer TUNNEL_TOKEN no .env)
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:-}
+    depends_on:
+      - videoteca
+
 volumes:
   caddy_data:
