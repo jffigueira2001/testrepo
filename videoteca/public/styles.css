@@ -91,3 +91,9 @@ th { font-size: .8rem; color: var(--muted); font-weight: 600; }
 .toast.err { background: var(--err); color: #fff; }
 .empty { text-align: center; padding: 3rem 1rem; color: var(--muted); }
 details > summary { cursor: pointer; font-weight: 600; padding: .4rem 0; }
+
+.dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text);
+  padding: 1.1rem 1.25rem; width: min(420px, calc(100vw - 32px)); box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+.dialog::backdrop { background: rgba(10,12,16,.45); }
+.dialog p { margin: 0; }
+button.danger-solid { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }

@@ -66,6 +66,42 @@ function toast(msg, isError = false) {
   toastTimer = setTimeout(() => { el.hidden = true; }, isError ? 6000 : 3000);
 }
 
+/** Diálogo de confirmação próprio (em vez de confirm()). Devolve true/false. */
+function ask(message, { okLabel = 'Confirmar', danger = true } = {}) {
+  return openDialog(message, null, okLabel, danger).then((v) => v !== null);
+}
+
+/** Pede um texto (em vez de prompt()). Devolve o texto ou null se cancelado. */
+function askText(message, value = '', type = 'text') {
+  return openDialog(message, { value, type }, 'Guardar', false);
+}
+
+function openDialog(message, input, okLabel, danger) {
+  const dlg = document.createElement('dialog');
+  dlg.className = 'dialog';
+  dlg.innerHTML = `
+    <form method="dialog" class="stack">
+      <p>${esc(message)}</p>
+      ${input ? `<input id="dlg-input" type="${input.type}" value="${esc(input.value)}" required>` : ''}
+      <div class="row" style="justify-content:flex-end">
+        <button type="button" value="cancel" id="dlg-cancel">Cancelar</button>
+        <button value="ok" class="${danger ? 'danger-solid' : 'primary'}">${esc(okLabel)}</button>
+      </div>
+    </form>`;
+  document.body.append(dlg);
+  return new Promise((resolve) => {
+    const field = dlg.querySelector('#dlg-input');
+    dlg.querySelector('#dlg-cancel').onclick = () => dlg.close('cancel');
+    dlg.addEventListener('close', () => {
+      const ok = dlg.returnValue === 'ok';
+      resolve(ok ? (field ? field.value.trim() : '') : null);
+      dlg.remove();
+    });
+    dlg.showModal();
+    (field || dlg.querySelector('button[value=ok]')).focus();
+  });
+}
+
 async function api(method, url, body) {
   const res = await fetch(`/api${url}`, {
     method,
@@ -139,7 +175,7 @@ async function route() {
 
 window.addEventListener('hashchange', route);
 document.getElementById('logout').addEventListener('click', async () => {
-  if (state.uploads.some((u) => u.status === 'uploading') && !confirm('Há uploads a decorrer. Sair mesmo assim?')) return;
+  if (state.uploads.some((u) => u.status === 'uploading') && !await ask('Há uploads a decorrer. Sair mesmo assim?')) return;
   await api('POST', '/logout');
   state.me = null;
   location.hash = '#/login';
@@ -391,7 +427,7 @@ async function viewGame(id) {
     if (await attempt(() => api('PATCH', `/games/${id}`, Object.fromEntries(new FormData(form))))) { toast('Jogo atualizado.'); route(); }
   });
   document.getElementById('del-game').onclick = async () => {
-    if (!confirm(`Apagar o jogo e TODOS os ${game.videos.length} vídeos? Não há volta atrás.`)) return;
+    if (!await ask(`Apagar o jogo e TODOS os ${game.videos.length} vídeos? Não há volta atrás.`)) return;
     if (await attempt(() => api('DELETE', `/games/${id}`))) { toast('Jogo apagado.'); location.hash = `#/team/${game.team_id}`; }
   };
 }
@@ -547,19 +583,19 @@ async function viewVideo(id) {
     if (r.videoId !== id) location.hash = `#/video/${r.videoId}`; else route();
   };
 
-  document.getElementById('do-trim').onclick = () => {
+  document.getElementById('do-trim').onclick = async () => {
     const { start, end } = sel();
     if (!(end > start)) return toast('O fim tem de ser depois do início.', true);
     const mode = $side.querySelector('input[name=mode]:checked').value;
-    if (mode === 'replace' && !confirm('Substituir o vídeo original pela parte selecionada? O resto é apagado.')) return;
+    if (mode === 'replace' && !await ask('Substituir o vídeo original pela parte selecionada? O resto é apagado.')) return;
     submitEdit('trim', { start, end, mode, precise: document.getElementById('precise').checked,
       title: document.getElementById('clip-title').value });
   };
 
-  $side.querySelectorAll('[data-op]').forEach((b) => b.addEventListener('click', () => {
+  $side.querySelectorAll('[data-op]').forEach((b) => b.addEventListener('click', async () => {
     const op = b.dataset.op;
     if (op === 'rotate') return submitEdit('rotate', { degrees: Number(b.dataset.deg) });
-    if (op === 'mute') return confirm('Remover o áudio deste vídeo?') && submitEdit('mute', {});
+    if (op === 'mute') return await ask('Remover o áudio deste vídeo?') && submitEdit('mute', {});
     if (op === 'compress') return submitEdit('compress', { height: Number(document.getElementById('c-height').value) });
   }));
 
@@ -570,7 +606,7 @@ async function viewVideo(id) {
     if (await attempt(() => api('PATCH', `/videos/${id}`, { title: fd.title, game_id: Number(fd.game_id) }))) { toast('Guardado.'); route(); }
   });
   document.getElementById('del').onclick = async () => {
-    if (!confirm('Apagar este vídeo definitivamente?')) return;
+    if (!await ask('Apagar este vídeo definitivamente?')) return;
     if (await attempt(() => api('DELETE', `/videos/${id}`))) { toast('Vídeo apagado.'); location.hash = `#/game/${v.game_id}`; }
   };
 }
@@ -666,7 +702,7 @@ function renderUploads() {
   });
   $list.querySelectorAll('[data-cancel]').forEach((b) => b.onclick = async () => {
     const u = state.uploads[b.dataset.cancel];
-    if (!confirm(`Cancelar o envio de "${u.title}"?`)) return;
+    if (!await ask(`Cancelar o envio de "${u.title}"?`)) return;
     u.status = 'canceled';
     if (u.tus) await u.tus.abort(true).catch(() => {});
     renderUploads();
@@ -856,12 +892,12 @@ async function viewAdmin() {
   });
   $app.querySelectorAll('[data-rename-team]').forEach((b) => b.onclick = async () => {
     const t = teams.find((x) => x.id === Number(b.dataset.renameTeam));
-    const name = prompt('Novo nome da equipa:', t.name);
+    const name = await askText('Novo nome da equipa:', t.name);
     if (name && await attempt(() => api('PATCH', `/teams/${t.id}`, { name }))) route();
   });
   $app.querySelectorAll('[data-del-team]').forEach((b) => b.onclick = async () => {
     const t = teams.find((x) => x.id === Number(b.dataset.delTeam));
-    if (!confirm(`Apagar "${t.name}" com ${t.games} jogos e ${t.videos} vídeos? Não há volta atrás.`)) return;
+    if (!await ask(`Apagar "${t.name}" com ${t.games} jogos e ${t.videos} vídeos? Não há volta atrás.`)) return;
     if (await attempt(() => api('DELETE', `/teams/${t.id}`))) { toast('Equipa apagada.'); route(); }
   });
   document.getElementById('new-user').addEventListener('submit', async (e) => {
@@ -873,11 +909,11 @@ async function viewAdmin() {
     else toast('Perfil atualizado.');
   });
   $app.querySelectorAll('[data-reset]').forEach((b) => b.onclick = async () => {
-    const password = prompt('Nova password (mín. 8 caracteres):');
+    const password = await askText('Nova password (mín. 8 caracteres):', '', 'text');
     if (password && await attempt(() => api('PATCH', `/users/${b.dataset.reset}`, { password }))) toast('Password alterada.');
   });
   $app.querySelectorAll('[data-del-user]').forEach((b) => b.onclick = async () => {
-    if (confirm('Apagar este utilizador?') && await attempt(() => api('DELETE', `/users/${b.dataset.delUser}`))) route();
+    if (await ask('Apagar este utilizador?') && await attempt(() => api('DELETE', `/users/${b.dataset.delUser}`))) route();
   });
 }
 
