@@ -6,6 +6,7 @@ export const config = {
   port: Number(process.env.PORT || 3000),
   dataDir,
   uploadsDir: path.join(dataDir, 'uploads'),
+  // Com STORAGE=local guarda aqui os vídeos; com STORAGE=drive é só espaço de trabalho temporário.
   videosDir: path.join(dataDir, 'videos'),
   thumbsDir: path.join(dataDir, 'thumbs'),
   dbFile: path.join(dataDir, 'videoteca.db'),
@@ -22,4 +23,28 @@ export const config = {
   x264Preset: process.env.X264_PRESET || 'veryfast',
   // Nº de proxies reversos à frente da app (ex.: 1 com Caddy/Nginx). 0 = acesso direto.
   trustProxy: Number(process.env.TRUST_PROXY || 0),
+  // Onde ficam os vídeos finais: 'local' (disco do servidor) ou 'drive' (Google Drive).
+  storage: process.env.STORAGE === 'drive' ? 'drive' : 'local',
+  drive: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+    refreshToken: process.env.GOOGLE_REFRESH_TOKEN || '',
+    // Pasta raiz no Drive (criada automaticamente se não for indicada).
+    rootFolderId: process.env.DRIVE_FOLDER_ID || '',
+    rootFolderName: process.env.DRIVE_FOLDER_NAME || 'Videoteca Andebol',
+    // Tamanho de cada bloco no envio para o Drive (MB, múltiplo de 0.25).
+    chunkMb: Number(process.env.DRIVE_CHUNK_MB || 64),
+    // Configuráveis só para testes.
+    apiBase: process.env.DRIVE_API_BASE || 'https://www.googleapis.com',
+    uploadBase: process.env.DRIVE_UPLOAD_BASE || 'https://www.googleapis.com',
+    tokenUrl: process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token',
+  },
 };
+
+if (config.storage === 'drive') {
+  const missing = ['clientId', 'clientSecret', 'refreshToken'].filter((k) => !config.drive[k]);
+  if (missing.length) {
+    console.error('STORAGE=drive requer GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e GOOGLE_REFRESH_TOKEN (ver README: "Guardar os vídeos no Google Drive").');
+    process.exit(1);
+  }
+}

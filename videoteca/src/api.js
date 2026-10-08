@@ -4,7 +4,9 @@ import { db, tx } from './db.js';
 import {
   hashPassword, verifyPassword, createSession, destroySession, sessionCookie, requireAuth, requireAdmin,
 } from './auth.js';
-import { enqueueJob, EDIT_TYPES, videoPath, thumbPath, deleteVideoFiles } from './media.js';
+import { enqueueJob, EDIT_TYPES, thumbPath, deleteVideoFiles } from './media.js';
+import * as storage from './storage.js';
+import { forgetFolder } from './drive.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '100kb' }));
@@ -93,15 +95,19 @@ api.patch('/teams/:id', requireAdmin, (req, res) => {
   if (!name) throw bad('Indica o nome da equipa.');
   const r = db.prepare('UPDATE teams SET name = ? WHERE id = ?').run(name, req.params.id);
   if (!r.changes) throw notFound('Equipa');
+  storage.teamChanged(Number(req.params.id), name);
   res.json({ ok: true });
 });
 
 api.delete('/teams/:id', requireAdmin, (req, res) => {
   const videos = db.prepare(`SELECT v.* FROM videos v JOIN games g ON g.id = v.game_id WHERE g.team_id = ?`)
     .all(req.params.id);
+  const gameIds = db.prepare('SELECT id FROM games WHERE team_id = ?').all(req.params.id).map((g) => g.id);
   const r = db.prepare('DELETE FROM teams WHERE id = ?').run(req.params.id);
   if (!r.changes) throw notFound('Equipa');
   videos.forEach(deleteVideoFiles);
+  gameIds.forEach((id) => forgetFolder(`game:${id}`));
+  storage.folderDeleted(`team:${req.params.id}`);
   res.json({ ok: true });
 });
 
@@ -176,6 +182,7 @@ api.patch('/games/:id', requireAdmin, (req, res) => {
   const r = db.prepare(`UPDATE games SET team_id = ?, date = ?, opponent = ?, competition = ?, venue = ?, notes = ? WHERE id = ?`)
     .run(g.team_id, g.date, g.opponent, g.competition, g.venue, g.notes, req.params.id);
   if (!r.changes) throw notFound('Jogo');
+  storage.gameChanged(Number(req.params.id));
   res.json({ ok: true });
 });
 
@@ -184,6 +191,7 @@ api.delete('/games/:id', requireAdmin, (req, res) => {
   const r = db.prepare('DELETE FROM games WHERE id = ?').run(req.params.id);
   if (!r.changes) throw notFound('Jogo');
   videos.forEach(deleteVideoFiles);
+  storage.folderDeleted(`game:${req.params.id}`);
   res.json({ ok: true });
 });
 
@@ -206,19 +214,18 @@ api.get('/videos/:id', (req, res) => {
 });
 
 // Streaming com suporte a "Range" (permite saltar para qualquer minuto sem descarregar tudo).
-api.get('/videos/:id/stream', (req, res) => {
-  const file = videoPath(loadVideo(req.params.id));
-  if (!file || !fs.existsSync(file)) throw notFound('Ficheiro de vídeo');
-  res.sendFile(file, { headers: { 'Content-Type': 'video/mp4' }, maxAge: '7d', immutable: true });
+api.get('/videos/:id/stream', async (req, res) => {
+  const v = loadVideo(req.params.id);
+  if (!v.file) throw notFound('Ficheiro de vídeo');
+  await storage.send(v.file, req, res);
 });
 
-api.get('/videos/:id/download', (req, res) => {
+api.get('/videos/:id/download', async (req, res) => {
   const v = loadVideo(req.params.id);
-  const file = videoPath(v);
-  if (!file || !fs.existsSync(file)) throw notFound('Ficheiro de vídeo');
+  if (!v.file) throw notFound('Ficheiro de vídeo');
   const game = db.prepare('SELECT g.date, g.opponent, t.name AS team FROM games g JOIN teams t ON t.id = g.team_id WHERE g.id = ?').get(v.game_id);
   const name = `${game.date} ${game.team} vs ${game.opponent} - ${v.title}.mp4`.replace(/[\\/:*?"<>|]+/g, '_');
-  res.download(file, name);
+  await storage.send(v.file, req, res, { downloadName: name });
 });
 
 api.get('/videos/:id/thumb', (req, res) => {
@@ -234,6 +241,7 @@ api.patch('/videos/:id', requireAdmin, (req, res) => {
   if (!title) throw bad('O título não pode ficar vazio.');
   if (!db.prepare('SELECT 1 FROM games WHERE id = ?').get(gameId)) throw bad('Jogo inválido.');
   db.prepare("UPDATE videos SET title = ?, game_id = ?, updated_at = datetime('now') WHERE id = ?").run(title, gameId, v.id);
+  storage.videoChanged({ ...v, title, game_id: gameId }, v.game_id);
   res.json({ ok: true });
 });
 

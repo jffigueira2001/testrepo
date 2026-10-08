@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { db } from './db.js';
 import { config } from './config.js';
+import * as storage from './storage.js';
 
 // ---------------------------------------------------------------------------
 // ffmpeg / ffprobe
@@ -90,16 +91,12 @@ function safeUnlink(file) {
   fs.rm(file, { force: true }, () => {});
 }
 
-export function videoPath(video) {
-  return video.file ? path.join(config.videosDir, video.file) : null;
-}
-
 export function thumbPath(video) {
   return video.thumb ? path.join(config.thumbsDir, video.thumb) : null;
 }
 
 export function deleteVideoFiles(video) {
-  safeUnlink(videoPath(video));
+  storage.removeInBackground(video.file);
   safeUnlink(thumbPath(video));
   if (video.source_path) {
     safeUnlink(video.source_path);
@@ -108,7 +105,7 @@ export function deleteVideoFiles(video) {
 }
 
 // ---------------------------------------------------------------------------
-// Operações
+// Operações. Cada uma escreve um MP4 novo em videosDir e devolve { outName }.
 // ---------------------------------------------------------------------------
 
 const getVideo = (id) => db.prepare('SELECT * FROM videos WHERE id = ?').get(id);
@@ -134,49 +131,53 @@ async function ingest(video, _params, onProgress) {
 
 /** Corta [start, end]. Rápido = sem recodificar (corta no keyframe mais próximo); preciso = recodifica. */
 async function trim(video, params, onProgress, sourceVideo) {
-  const src = videoPath(sourceVideo);
-  if (!src || !fs.existsSync(src)) throw new Error('Vídeo de origem não encontrado.');
   const start = Math.max(0, Number(params.start) || 0);
   const end = Number(params.end);
   if (!(end > start)) throw new Error('Intervalo de corte inválido.');
   const dur = end - start;
-  const outName = newName(video.id, 'mp4');
-  const out = path.join(config.videosDir, outName);
-  const codec = params.precise ? [...h264Args(), ...AAC] : ['-c', 'copy', '-avoid_negative_ts', 'make_zero'];
-  await ffmpeg(['-ss', String(start), '-i', src, '-t', String(dur), '-map', '0:v:0', '-map', '0:a:0?',
-    ...codec, ...FASTSTART, out], dur, onProgress);
-  return { outName };
+  // Cortes curtos (clips) leem só o pedaço necessário; cortes longos descarregam o vídeo primeiro.
+  const input = await storage.openInput(sourceVideo.file, { partial: dur <= 20 * 60 });
+  try {
+    const outName = newName(video.id, 'mp4');
+    const codec = params.precise ? [...h264Args(), ...AAC] : ['-c', 'copy', '-avoid_negative_ts', 'make_zero'];
+    await ffmpeg(['-ss', String(start), ...input.args, '-t', String(dur), '-map', '0:v:0', '-map', '0:a:0?',
+      ...codec, ...FASTSTART, path.join(config.videosDir, outName)], dur, onProgress);
+    return { outName };
+  } finally {
+    input.cleanup();
+  }
 }
 
-async function rotate(video, params, onProgress) {
-  const src = videoPath(video);
+/** Corre ffmpeg sobre o vídeo inteiro com os argumentos de saída indicados. */
+async function transform(video, outputArgs, onProgress) {
+  const input = await storage.openInput(video.file);
+  try {
+    const outName = newName(video.id, 'mp4');
+    await ffmpeg([...input.args, ...outputArgs, ...FASTSTART, path.join(config.videosDir, outName)],
+      video.duration, onProgress);
+    return { outName };
+  } finally {
+    input.cleanup();
+  }
+}
+
+function rotate(video, params, onProgress) {
   const filters = { 90: ['transpose=1'], 180: ['hflip', 'vflip'], 270: ['transpose=2'] }[Number(params.degrees)];
   if (!filters) throw new Error('Rotação inválida (usa 90, 180 ou 270).');
-  const outName = newName(video.id, 'mp4');
-  await ffmpeg(['-i', src, '-map', '0:v:0', '-map', '0:a:0?', ...h264Args(filters), '-c:a', 'copy',
-    ...FASTSTART, path.join(config.videosDir, outName)], video.duration, onProgress);
-  return { outName };
+  return transform(video, ['-map', '0:v:0', '-map', '0:a:0?', ...h264Args(filters), '-c:a', 'copy'], onProgress);
 }
 
-async function mute(video, _params, onProgress) {
-  const src = videoPath(video);
-  const outName = newName(video.id, 'mp4');
-  await ffmpeg(['-i', src, '-map', '0:v:0', '-c:v', 'copy', '-an', ...FASTSTART,
-    path.join(config.videosDir, outName)], video.duration, onProgress);
-  return { outName };
+function mute(video, _params, onProgress) {
+  return transform(video, ['-map', '0:v:0', '-c:v', 'copy', '-an'], onProgress);
 }
 
 /** Reduz resolução/tamanho. Útil para jogos gravados em 4K que ocupam dezenas de GB. */
-async function compress(video, params, onProgress) {
-  const src = videoPath(video);
+function compress(video, params, onProgress) {
   const height = [480, 720, 1080].includes(Number(params.height)) ? Number(params.height) : 720;
   const crf = Math.min(32, Math.max(18, Number(params.crf) || 26));
-  const outName = newName(video.id, 'mp4');
-  await ffmpeg(['-i', src, '-map', '0:v:0', '-map', '0:a:0?',
+  return transform(video, ['-map', '0:v:0', '-map', '0:a:0?',
     '-c:v', 'libx264', '-preset', config.x264Preset, '-crf', String(crf), '-pix_fmt', 'yuv420p',
-    '-vf', `scale=-2:'min(ih,${height})'`, ...AAC, ...FASTSTART,
-    path.join(config.videosDir, outName)], video.duration, onProgress);
-  return { outName };
+    '-vf', `scale=-2:'min(ih,${height})'`, ...AAC], onProgress);
 }
 
 const OPERATIONS = { ingest, trim, rotate, mute, compress };
@@ -226,27 +227,31 @@ async function runJob(job) {
   // Num corte para "novo clip", o job pertence ao clip e o vídeo de origem vem nos parâmetros.
   const sourceVideo = params.sourceVideoId ? getVideo(params.sourceVideoId) : video;
 
-  let outName = null;
+  let out = null;
+  let thumb = null;
   try {
     if (!sourceVideo) throw new Error('Vídeo de origem já não existe.');
     if (job.type !== 'ingest' && !sourceVideo.file) throw new Error('O vídeo ainda não está pronto.');
     const result = await OPERATIONS[job.type](video, params, onProgress, sourceVideo);
-    outName = result.outName;
-    const out = path.join(config.videosDir, outName);
+    out = path.join(config.videosDir, result.outName);
     const info = await probe(out);
-    const thumb = await makeThumbnail(out, info.duration, newName(video.id, 'jpg'));
+    thumb = await makeThumbnail(out, info.duration, newName(video.id, 'jpg'));
+
+    // Com o Google Drive, envia o ficheiro final (e apaga a cópia local).
+    const ref = await storage.store(out, getVideo(video.id) || video);
+    out = null;
 
     const current = getVideo(video.id);
     if (!current) { // apagado durante o processamento
-      safeUnlink(out);
+      storage.removeInBackground(ref);
       safeUnlink(path.join(config.thumbsDir, thumb));
       return;
     }
     db.prepare(`UPDATE videos SET file = ?, thumb = ?, size = ?, duration = ?, width = ?, height = ?,
                 status = 'ready', error = NULL, source_path = NULL, updated_at = datetime('now') WHERE id = ?`)
-      .run(outName, thumb, info.size, info.duration, info.width, info.height, video.id);
+      .run(ref, thumb, info.size, info.duration, info.width, info.height, video.id);
     // Remove os ficheiros antigos só depois de o novo estar registado.
-    safeUnlink(videoPath(current));
+    storage.removeInBackground(current.file);
     safeUnlink(thumbPath(current));
     if (result.removeSource && current.source_path) {
       safeUnlink(current.source_path);
@@ -255,7 +260,8 @@ async function runJob(job) {
     setJob.run('done', 1, null, new Date().toISOString(), job.id);
   } catch (err) {
     console.error(`[job ${job.id}] ${job.type} falhou:`, err.message);
-    if (outName) safeUnlink(path.join(config.videosDir, outName));
+    safeUnlink(out);
+    if (thumb) safeUnlink(path.join(config.thumbsDir, thumb));
     setJob.run('error', 0, err.message, new Date().toISOString(), job.id);
     // Se o vídeo ainda não tinha ficheiro (upload novo ou clip), fica marcado com erro.
     if (!getVideo(video.id)?.file) {

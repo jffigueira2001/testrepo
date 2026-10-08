@@ -11,7 +11,8 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.js",
     "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
-    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "drive:auth": "node scripts/drive-auth.js"
   },
   "dependencies": {
     "@tus/file-store": "^2.1.1",

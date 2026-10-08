@@ -18,6 +18,9 @@ Plataforma web para guardar os vídeos dos jogos da equipa.
   - 🔇 remover o som;
   - 🗜 comprimir para 1080p / 720p / 480p (um jogo em 4K passa de dezenas de GB para poucos GB);
   - mudar o título, mudar o vídeo de jogo e apagar.
+- **Vídeos no disco do servidor ou no Google Drive.** Com o Google Drive, os vídeos ficam
+  organizados em pastas `Videoteca Andebol / Equipa / AAAA-MM-DD vs Adversário`. O servidor só
+  precisa de espaço temporário.
 - **Perfis:** *Admin* edita, apaga e gere equipas e utilizadores. *Membro* vê, descarrega,
   carrega vídeos e cria jogos.
 
@@ -38,7 +41,8 @@ Browser ◀──(HTTP Range / streaming)── /api/videos/:id/stream
   ficheiro: é muito rápido e não perde qualidade. Formatos como `.mts`, `.avi` ou HEVC são recodificados.
 - As edições correm no servidor, numa fila. Pode-se fechar a página e o vídeo atual continua
   visível até a nova versão estar pronta.
-- A base de dados é SQLite (`data/videoteca.db`). Os vídeos ficam em ficheiros no disco.
+- A base de dados é SQLite (`data/videoteca.db`). Os vídeos finais ficam no disco
+  (`data/videos/`) ou no Google Drive (`STORAGE=drive`, ver abaixo).
 - Stack: Node.js 22 + Express, `@tus/server`, ffmpeg. A frontend é JavaScript simples, sem passo de build.
 
 ## Instalar (Docker, recomendado)
@@ -92,6 +96,62 @@ Os blocos de upload de 50 MB ficam abaixo do limite de 100 MB por pedido da Clou
 Para um teste rápido sem domínio, corre `cloudflared tunnel --url http://localhost:3000`.
 Isto dá um link `https://….trycloudflare.com` temporário, que muda sempre que o comando é reiniciado.
 
+⚠️ Os termos da Cloudflare restringem servir vídeo através da rede gratuita deles, e um túnel
+público conta para isso. Para uso pequeno e privado é uma zona cinzenta. Como solução
+permanente, prefere abrir as portas 80/443 com o Caddy (secção anterior), por exemplo com um
+subdomínio gratuito do [DuckDNS](https://www.duckdns.org).
+
+## Guardar os vídeos no Google Drive
+
+Com `STORAGE=drive`, cada vídeo é enviado para o Google Drive da conta do clube depois de
+processado, e a cópia local é apagada. As funcionalidades da plataforma mantêm-se todas.
+
+```
+Browser ──upload──▶ servidor (ffmpeg: converte, miniatura) ──▶ Google Drive
+Browser ◀──vídeo (Range)── servidor ◀──────────────────────── Google Drive
+```
+
+- **Pastas:** `Videoteca Andebol / Seniores / 2026-10-08 vs ABC Braga / 1.ª parte.mp4`. Renomear
+  ou mudar vídeos e jogos na plataforma também muda no Drive.
+- **Apagar** na plataforma manda o ficheiro para a **reciclagem** do Drive, onde pode ser
+  recuperado durante 30 dias.
+- **Edições:** os cortes até 20 minutos leem só o pedaço necessário do Drive. As outras edições
+  descarregam o vídeo, processam-no e enviam a nova versão.
+- **Acesso da app ao Drive:** só vê os ficheiros que ela própria cria (permissão `drive.file`), não o resto do Drive.
+- **Espaço no servidor:** chega um disco com espaço livre para cerca de 3× o maior vídeo
+  (ex.: 30–40 GB para jogos de 10 GB), usado durante o upload e as edições.
+- **Internet do servidor:** quem vê um vídeo recebe-o através do servidor. A velocidade de envio
+  da internet do servidor conta.
+- **Vídeos antigos:** os que já estavam no disco antes de mudar para o Drive continuam a funcionar a partir do disco.
+
+### Configurar (uma vez, ~15 minutos)
+
+1. **Espaço no Drive.** Os 15 GB gratuitos dão para 1–2 jogos. Com o Google One de 2 TB cabem
+   cerca de 200 jogos de 10 GB, ou muitos mais se forem comprimidos para 720p.
+2. **Criar as credenciais** em <https://console.cloud.google.com>, com a conta Google do clube:
+   1. Cria um projeto (ex.: "Videoteca").
+   2. Em **APIs e serviços → Biblioteca**, ativa a **Google Drive API**.
+   3. Em **Ecrã de consentimento OAuth** (ou "Google Auth Platform"):
+      - escolhe o tipo *Externo*, preenche o nome e o email;
+      - em *Âmbitos*, adiciona `.../auth/drive.file`;
+      - em *Público*, carrega em **Publicar app** ("Em produção").
+      Se ficar em modo de teste, a ligação expira ao fim de 7 dias.
+   4. Em **Credenciais → Criar credenciais → ID de cliente OAuth**, escolhe o tipo **App para
+      computador**. Copia o *ID de cliente* e o *Segredo do cliente*.
+3. **Autorizar.** Corre isto num computador com browser e Node.js:
+   ```bash
+   cd videoteca && npm install
+   GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... npm run drive:auth
+   ```
+   Abre o link que aparece e entra com a conta do clube. Se aparecer o aviso "A Google não
+   verificou esta app", carrega em *Avançado → Continuar*: a app é tua. O terminal mostra 4 linhas.
+4. **Colar no `.env`** essas linhas (`STORAGE=drive`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+   `GOOGLE_REFRESH_TOKEN`) e reiniciar: `docker compose up -d`.
+
+Para a equipa também ver os vídeos diretamente no Drive, partilha a pasta "Videoteca Andebol"
+com eles, só com permissão de leitura. Não apagues ficheiros diretamente no Drive: faz isso
+na plataforma.
+
 ## Correr sem Docker
 
 Requer Node.js ≥ 22.13 e `ffmpeg`/`ffprobe` no PATH.
@@ -122,10 +182,14 @@ npm test
 | `SESSION_DAYS`   | `30`                     | Duração das sessões |
 | `SECURE_COOKIES` | `false`                  | `true` quando servido por HTTPS |
 | `TRUST_PROXY`    | `0`                      | Nº de proxies reversos à frente (ex.: `1` com Caddy) |
+| `STORAGE`        | `local`                  | `local` (disco) ou `drive` (Google Drive) |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` | — | Credenciais do Drive (`npm run drive:auth`) |
+| `DRIVE_FOLDER_NAME` | `Videoteca Andebol`   | Nome da pasta raiz criada no Drive |
 
 ## Cópias de segurança
 
-Tudo o que importa está em `DATA_DIR`. Para copiar com a app a correr:
+Tudo o que importa está em `DATA_DIR`. Com `STORAGE=drive`, os vídeos já estão no Drive e só é
+preciso copiar a base de dados e as miniaturas. Para copiar com a app a correr:
 
 ```bash
 sqlite3 data/videoteca.db ".backup data/backup.db"   # base de dados consistente
