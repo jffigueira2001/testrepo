@@ -315,6 +315,34 @@ api.post('/videos/:id/edit', requireAdmin, (req, res) => {
   res.status(202).json({ videoId: v.id, jobId: enqueueJob(v.id, type, params, req.user.id) });
 });
 
+/**
+ * Juntar vários vídeos/clips num vídeo novo (admins).
+ * Corpo: { video_ids: [ordem], title, game_id? }. O vídeo novo fica no jogo indicado (por omissão,
+ * o do primeiro vídeo) e herda os jogadores de todos os clips usados.
+ */
+api.post('/videos/concat', requireAdmin, (req, res) => {
+  const ids = Array.isArray(req.body?.video_ids) ? req.body.video_ids.map(Number) : [];
+  if (ids.length < 2) throw bad('Escolhe pelo menos dois vídeos para juntar.');
+  if (ids.length > 100) throw bad('No máximo 100 vídeos de cada vez.');
+  const sources = ids.map((id) => loadVideo(id));
+  if (sources.some((v) => v.status !== 'ready')) throw bad('Há vídeos que ainda estão a ser processados.');
+  const gameId = Number(req.body?.game_id) || sources[0].game_id;
+  if (!db.prepare('SELECT 1 FROM games WHERE id = ?').get(gameId)) throw bad('Jogo inválido.');
+  const title = str(req.body?.title, 200) || `Compilação (${sources.length} vídeos)`;
+
+  const result = tx(() => {
+    const { lastInsertRowid } = db.prepare(`
+      INSERT INTO videos (game_id, title, original_name, status, uploaded_by) VALUES (?, ?, '', 'processing', ?)`)
+      .run(gameId, title, req.user.id);
+    const videoId = Number(lastInsertRowid);
+    const playerIds = db.prepare(`SELECT DISTINCT player_id FROM video_players WHERE video_id IN (${ids.map(() => '?').join(',')})`)
+      .all(...ids).map((r) => r.player_id);
+    setVideoPlayers(videoId, playerIds);
+    return { videoId, jobId: enqueueJob(videoId, 'concat', { sourceIds: ids }, req.user.id) };
+  });
+  res.status(202).json(result);
+});
+
 // ---------------------------------------------------------------------------
 // Jogadores: etiquetas nos clips (do nosso clube ou do adversário)
 // ---------------------------------------------------------------------------

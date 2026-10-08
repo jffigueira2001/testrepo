@@ -19,6 +19,9 @@ Plataforma web para guardar os vídeos dos jogos da equipa.
   - corte rápido (sem perda, sem recodificar) ou preciso ao frame;
   - ↻ rodar 90° / 180° / 270°;
   - 🔇 remover o som;
+  - 🎞 **juntar** vários vídeos ou clips num vídeo novo, pela ordem escolhida (ex.: resumo de um jogo, ou todos os
+    clips de um jogador na época). Se os clips tiverem o mesmo formato, a junção é rápida e sem perda de qualidade.
+    Se não tiverem, tudo é ajustado ao formato do primeiro. O vídeo novo herda os jogadores dos clips usados;
   - 🗜 comprimir para 1080p / 720p / 480p (um jogo em 4K passa de dezenas de GB para poucos GB);
   - mudar o título, mudar o vídeo de jogo e apagar.
 - **Vídeos no disco do servidor ou no Google Drive.** Com o Google Drive, os vídeos ficam
@@ -221,6 +224,7 @@ Todas as rotas exigem sessão (cookie), exceto `POST /api/login`.
 | `POST/PATCH/HEAD` | `/api/uploads[/:id]` (tus) | todos |
 | `GET` | `/api/videos/:id`, `/stream`, `/download`, `/thumb` | todos |
 | `POST` | `/api/videos/:id/edit` `{type: trim\|rotate\|mute\|compress, params}` | admin |
+| `POST` | `/api/videos/concat` `{video_ids: [...], title, game_id?}` | admin |
 | `PATCH/DELETE` | `/api/videos/:id`, `/api/games/:id`, `/api/players/:id` | admin |
 | `POST` | `/api/players`; `PUT /api/videos/:id/players` `{player_ids}` | admin |
 | `GET/POST/PATCH/DELETE` | `/api/users` | admin |

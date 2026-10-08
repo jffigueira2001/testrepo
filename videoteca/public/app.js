@@ -1,7 +1,7 @@
 // Videoteca CDE Camões — frontend (sem build: ES modules + tus-js-client global)
 
 const $app = document.getElementById('app');
-const state = { me: null, teams: [], uploads: [], timers: [] };
+const state = { me: null, teams: [], uploads: [], timers: [], join: { items: [], source: '' } };
 
 // ---------------------------------------------------------------------------
 // Utilitários
@@ -47,7 +47,7 @@ function fmtBytes(n) {
 const today = () => new Date().toISOString().slice(0, 10);
 const CLUB = 'CDE Camões';
 const VENUE = { casa: 'Casa', fora: 'Fora', neutro: 'Neutro' };
-const JOB_LABEL = { ingest: 'Processar upload', trim: 'Cortar', rotate: 'Rodar', mute: 'Remover som', compress: 'Comprimir' };
+const JOB_LABEL = { ingest: 'Processar upload', trim: 'Cortar', rotate: 'Rodar', mute: 'Remover som', compress: 'Comprimir', concat: 'Juntar vídeos' };
 const STATUS_PILL = {
   processing: '<span class="pill warn">a processar</span>',
   ready: '<span class="pill ok">pronto</span>',
@@ -142,6 +142,7 @@ const routes = [
   [/^#\/?$/, viewLibrary],
   [/^#\/team\/(\d+)$/, () => viewLibrary()],
   [/^#\/players$/, viewPlayers],
+  [/^#\/join$/, viewJoin],
   [/^#\/player\/(\d+)$/, (id) => viewPlayer(Number(id))],
   [/^#\/game\/(\d+)$/, (id) => viewGame(Number(id))],
   [/^#\/video\/(\d+)$/, (id) => viewVideo(Number(id))],
@@ -333,6 +334,7 @@ async function viewLibrary() {
       </div>
       <div class="row">
         <input id="q" type="search" placeholder="🔍 Adversário, jogador, competição, data…" style="width:300px">
+        ${isAdmin() ? '<a class="btn" href="#/join">🎞 Juntar vídeos</a>' : ''}
         <a class="btn primary" href="#/upload">⬆ Carregar vídeo</a>
       </div>
     </div>
@@ -395,7 +397,8 @@ async function viewGame(id) {
       </div>
       <div class="row">
         <a class="btn primary" href="#/upload?game=${game.id}">⬆ Carregar para este jogo</a>
-        ${isAdmin() ? '<button id="edit-game">Editar jogo</button><button class="danger" id="del-game">Apagar jogo</button>' : ''}
+        ${isAdmin() ? `<button id="join-game">🎞 Juntar vídeos</button>
+          <button id="edit-game">Editar jogo</button><button class="danger" id="del-game">Apagar jogo</button>` : ''}
       </div>
     </div>
     ${game.notes ? `<p>${esc(game.notes)}</p>` : ''}
@@ -436,6 +439,7 @@ async function viewGame(id) {
   }
 
   if (!isAdmin()) return;
+  document.getElementById('join-game').onclick = () => openJoin([], `game:${game.id}`);
   const form = document.getElementById('game-form');
   document.getElementById('edit-game').onclick = () => { form.hidden = false; };
   document.getElementById('cancel-edit').onclick = () => { form.hidden = true; };
@@ -581,7 +585,10 @@ async function viewPlayer(id) {
   $app.innerHTML = `
     <div class="small muted"><a href="#/players">Jogadores</a> ›</div>
     <h1>${p.number != null ? `<span class="muted">${p.number}</span> ` : ''}${esc(p.name)}</h1>
-    <div class="muted small">${esc(p.club || CLUB)} · ${p.videos.length} clip${p.videos.length === 1 ? '' : 's'}</div>
+    <div class="row spread">
+      <div class="muted small">${esc(p.club || CLUB)} · ${p.videos.length} clip${p.videos.length === 1 ? '' : 's'}</div>
+      ${isAdmin() && p.videos.length > 1 ? '<button id="join-player">🎞 Juntar os clips deste jogador</button>' : ''}
+    </div>
     ${p.videos.length ? `<div class="cards" style="margin-top:1rem">${p.videos.map((v) => `
       <a class="card" href="#/video/${v.id}">
         <div class="thumb" ${v.has_thumb ? `style="background-image:url('${thumbUrl(v)}')"` : ''}>${v.has_thumb ? '' : '⏳'}
@@ -592,6 +599,139 @@ async function viewPlayer(id) {
           ${playerChips(v.players)}
         </div>
       </a>`).join('')}</div>` : '<div class="empty">Ainda não há clips com este jogador.</div>'}`;
+  const joinBtn = document.getElementById('join-player');
+  if (joinBtn) {
+    // Do mais antigo para o mais recente: um resumo da época do jogador.
+    joinBtn.onclick = () => openJoin(p.videos.filter((v) => v.status === 'ready').slice().reverse(),
+      `player:${p.id}`, `${p.name}: resumo`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Juntar vídeos (admins): escolher, ordenar e criar um vídeo novo
+// ---------------------------------------------------------------------------
+
+function openJoin(items, source = '', title = '') {
+  const known = new Set(state.join.items.map((i) => i.id));
+  state.join.items.push(...items.filter((i) => !known.has(i.id)));
+  state.join.source = source || state.join.source;
+  if (title && !state.join.title) state.join.title = title;
+  location.hash = '#/join';
+}
+
+async function viewJoin() {
+  if (!isAdmin()) { $app.innerHTML = '<div class="empty">Só para administradores.</div>'; return; }
+  const [games, players] = await Promise.all([api('GET', '/games'), api('GET', '/players')]);
+  const join = state.join;
+  if (!join.source && games[0]) join.source = `game:${games[0].id}`;
+
+  $app.innerHTML = `
+    <div class="small muted"><a href="#/">Biblioteca</a> ›</div>
+    <h1>Juntar vídeos</h1>
+    <p class="muted">Escolhe os vídeos ou clips pela ordem em que devem aparecer. Fica um vídeo novo e os originais não mudam.</p>
+    <div class="join-wrap">
+      <section class="panel stack">
+        <div class="row spread"><strong>Sequência</strong><span class="small muted" id="j-total"></span></div>
+        <ol class="join-list" id="j-list"></ol>
+        <div><label for="j-title">Título do vídeo novo</label>
+          <input id="j-title" value="${esc(join.title || '')}" placeholder="ex.: Golos 1.ª volta, Resumo do jogo"></div>
+        <div><label for="j-game">Guardar no jogo</label><select id="j-game">
+          <option value="">O jogo do primeiro vídeo</option>
+          ${games.map((g) => `<option value="${g.id}">${fmtDate(g.date)} vs ${esc(g.opponent)}</option>`).join('')}
+        </select></div>
+        <div class="row spread">
+          <button type="button" id="j-clear" class="link">Limpar</button>
+          <button class="primary" id="j-go">🎞 Juntar</button>
+        </div>
+      </section>
+      <section class="stack">
+        <div class="row"><label for="j-source" style="margin:0">Adicionar de</label>
+          <select id="j-source" style="flex:1;width:auto">
+            <optgroup label="Jogos">${games.map((g) => `<option value="game:${g.id}">${fmtDate(g.date)} vs ${esc(g.opponent)}</option>`).join('')}</optgroup>
+            ${players.length ? `<optgroup label="Jogadores">${players.map((p) => `<option value="player:${p.id}">${esc(playerLabel(p))}${p.club ? ` (${esc(p.club)})` : ''}</option>`).join('')}</optgroup>` : ''}
+          </select></div>
+        <div id="j-results" class="join-results"></div>
+      </section>
+    </div>`;
+
+  const $list = document.getElementById('j-list');
+  const $results = document.getElementById('j-results');
+  const $source = document.getElementById('j-source');
+  if (join.source) $source.value = join.source;
+  let results = [];
+
+  const thumbStyle = (v) => (v.has_thumb ? `style="background-image:url('${thumbUrl(v)}')"` : '');
+  const renderList = () => {
+    const total = join.items.reduce((n, v) => n + (v.duration || 0), 0);
+    document.getElementById('j-total').textContent = join.items.length
+      ? `${join.items.length} vídeo${join.items.length === 1 ? '' : 's'} · ${fmtDuration(total)}` : '';
+    $list.innerHTML = join.items.length ? join.items.map((v, i) => `
+      <li class="join-item">
+        <div class="thumb mini" ${thumbStyle(v)}></div>
+        <div class="join-text"><div class="join-title">${esc(v.title)}</div>
+          <div class="small muted">${v.date ? `${fmtDate(v.date)} vs ${esc(v.opponent)} · ` : ''}${fmtDuration(v.duration)}</div></div>
+        <div class="join-actions">
+          <button type="button" data-up="${i}" ${i ? '' : 'disabled'} aria-label="Subir">↑</button>
+          <button type="button" data-down="${i}" ${i < join.items.length - 1 ? '' : 'disabled'} aria-label="Descer">↓</button>
+          <button type="button" data-rm="${i}" aria-label="Tirar">✕</button>
+        </div>
+      </li>`).join('') : '<li class="small muted">Ainda não escolheste nenhum vídeo. Adiciona-os a partir da lista de vídeos.</li>';
+    document.getElementById('j-go').disabled = join.items.length < 2;
+    $list.querySelectorAll('[data-up]').forEach((b) => b.onclick = () => move(Number(b.dataset.up), -1));
+    $list.querySelectorAll('[data-down]').forEach((b) => b.onclick = () => move(Number(b.dataset.down), 1));
+    $list.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => { join.items.splice(Number(b.dataset.rm), 1); renderAll(); });
+  };
+  const move = (i, d) => {
+    const [it] = join.items.splice(i, 1);
+    join.items.splice(i + d, 0, it);
+    renderAll();
+  };
+  const renderResults = () => {
+    $results.innerHTML = results.length ? results.map((v, i) => {
+      const added = join.items.some((x) => x.id === v.id);
+      return `<div class="join-item">
+        <div class="thumb mini" ${thumbStyle(v)}></div>
+        <div class="join-text"><div class="join-title">${esc(v.title)}</div>
+          <div class="small muted">${fmtDate(v.date)} vs ${esc(v.opponent)} · ${fmtDuration(v.duration)}</div>
+          ${playerChips(v.players)}</div>
+        <button type="button" data-add="${i}" ${added ? 'disabled' : ''}>${added ? '✓ Na sequência' : '+ Adicionar'}</button>
+      </div>`;
+    }).join('') : '<div class="empty">Sem vídeos prontos aqui.</div>';
+    $results.querySelectorAll('[data-add]').forEach((b) => b.onclick = () => { join.items.push(results[Number(b.dataset.add)]); renderAll(); });
+  };
+  const renderAll = () => { renderList(); renderResults(); };
+
+  async function loadSource() {
+    join.source = $source.value;
+    const [kind, sid] = join.source.split(':');
+    if (kind === 'game') {
+      const g = await api('GET', `/games/${sid}`);
+      results = g.videos.map((v) => ({ ...v, date: g.date, opponent: g.opponent }));
+    } else if (kind === 'player') {
+      results = (await api('GET', `/players/${sid}`)).videos;
+    } else {
+      results = [];
+    }
+    results = results.filter((v) => v.status === 'ready');
+    renderResults();
+  }
+  $source.onchange = loadSource;
+  document.getElementById('j-title').oninput = (e) => { join.title = e.target.value; };
+  document.getElementById('j-clear').onclick = () => { join.items = []; join.title = ''; document.getElementById('j-title').value = ''; renderAll(); };
+  document.getElementById('j-go').onclick = async () => {
+    const r = await attempt(() => api('POST', '/videos/concat', {
+      video_ids: join.items.map((v) => v.id),
+      title: document.getElementById('j-title').value,
+      game_id: Number(document.getElementById('j-game').value) || undefined,
+    }));
+    if (!r) return;
+    state.join = { items: [], source: join.source, title: '' };
+    toast('A juntar os vídeos. Podes sair desta página: o processamento continua no servidor.');
+    location.hash = `#/video/${r.videoId}`;
+  };
+
+  renderList();
+  await loadSource();
 }
 
 // ---------------------------------------------------------------------------
@@ -678,6 +818,7 @@ async function viewVideo(id) {
         </select>
         <button data-op="compress" ${ready ? '' : 'disabled'}>🗜 Comprimir</button>
       </div>
+      <div class="row"><button type="button" id="join-this" ${ready ? '' : 'disabled'}>🎞 Juntar com outros vídeos</button></div>
       <div class="small muted">Comprimir para 720p reduz muito o tamanho de jogos gravados em 4K/1080p.</div>
     </div>
 
@@ -766,6 +907,9 @@ async function viewVideo(id) {
     if (op === 'mute') return await ask('Remover o áudio deste vídeo?') && submitEdit('mute', {});
     if (op === 'compress') return submitEdit('compress', { height: Number(document.getElementById('c-height').value) });
   }));
+
+  document.getElementById('join-this').onclick = () =>
+    openJoin([{ ...v, date: game.date, opponent: game.opponent, has_thumb: true }], `game:${game.id}`);
 
   // --- Metadados
   document.getElementById('meta').addEventListener('submit', async (e) => {

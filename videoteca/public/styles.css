@@ -118,3 +118,16 @@ a.chip:hover { border-color: var(--muted); }
 .picker-row button { flex: none; padding-inline: .7rem; }
 .num { text-align: right; font-variant-numeric: tabular-nums; width: 4.5rem; }
 h3.month { margin-top: 1rem; }
+
+.join-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; margin-top: 1rem; }
+@media (max-width: 860px) { .join-wrap { grid-template-columns: minmax(0, 1fr); } }
+.join-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; counter-reset: seq; }
+.join-list > .join-item { counter-increment: seq; }
+.join-list > .join-item::before { content: counter(seq); font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8rem; width: 1.2rem; text-align: right; }
+.join-results { display: grid; gap: .4rem; }
+.join-item { display: flex; align-items: center; gap: .6rem; padding: .4rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.thumb.mini { width: 72px; flex: none; border-radius: 5px; font-size: 1rem; }
+.join-text { flex: 1; min-width: 0; }
+.join-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.join-actions { display: flex; gap: .25rem; flex: none; }
+.join-actions button, .join-item > button { padding: .3rem .55rem; flex: none; }

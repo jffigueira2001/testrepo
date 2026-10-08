@@ -192,9 +192,32 @@ test('fluxo completo: equipa → jogo → upload → processamento → edição'
   const compressed = (await call('GET', `/api/videos/${first.id}`)).data;
   assert.equal(compressed.height, 480);
 
+  // Juntar: dois clips com o mesmo formato (junta sem recodificar)…
+  const clipA = (await call('POST', `/api/videos/${second.id}/edit`, { type: 'trim', params: { start: 0, end: 2, mode: 'clip', precise: true, playerIds: [rui.id] } })).data;
+  const clipB = (await call('POST', `/api/videos/${second.id}/edit`, { type: 'trim', params: { start: 1, end: 3, mode: 'clip', precise: true } })).data;
+  await waitFor(jobsIdle);
+  assert.equal((await call('POST', '/api/videos/concat', { video_ids: [clipA.videoId] })).status, 400);
+  assert.equal((await call('POST', '/api/videos/concat', { video_ids: [clipA.videoId, clipB.videoId] }, member)).status, 403);
+  const reel = (await call('POST', '/api/videos/concat', { video_ids: [clipA.videoId, clipB.videoId], title: 'Resumo' })).data;
+  // …e vídeos diferentes (paisagem com som + vertical sem som): normaliza para o formato do primeiro.
+  const mixed = (await call('POST', '/api/videos/concat', { video_ids: [clip.videoId, first.id] })).data;
+  await waitFor(jobsIdle);
+  const reelV = (await call('GET', `/api/videos/${reel.videoId}`)).data;
+  assert.equal(reelV.status, 'ready', reelV.error);
+  assert.equal(reelV.title, 'Resumo');
+  assert.ok(Math.abs(reelV.duration - 4) < 0.4, `resumo ${reelV.duration}`);
+  assert.deepEqual(reelV.players.map((p) => p.id), [rui.id]); // herda os jogadores dos clips
+  const mixedV = (await call('GET', `/api/videos/${mixed.videoId}`)).data;
+  assert.equal(mixedV.status, 'ready', mixedV.error);
+  assert.equal(mixedV.title, 'Compilação (2 vídeos)');
+  assert.equal(mixedV.width, 640);
+  assert.equal(mixedV.height, 360);
+  assert.ok(Math.abs(mixedV.duration - (after[clip.videoId].duration + compressed.duration)) < 0.5, `misto ${mixedV.duration}`);
+  assert.deepEqual(mixedV.players.map((p) => p.id), [ze.id]);
+
   // Os ficheiros antigos são removidos: um mp4 por vídeo.
   const files = fs.readdirSync(path.join(tmp, 'data/videos'));
-  assert.equal(files.length, 3, files.join(','));
+  assert.equal(files.length, 7, files.join(','));
 
   // Apagar o jogo apaga os vídeos e os ficheiros.
   assert.equal((await call('DELETE', `/api/games/${game.id}`)).status, 200);

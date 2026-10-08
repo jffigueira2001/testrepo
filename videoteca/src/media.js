@@ -43,7 +43,11 @@ export async function probe(file) {
     height: video.height || 0,
     vcodec: video.codec_name,
     pixFmt: video.pix_fmt,
+    profile: video.profile,
+    fps: video.r_frame_rate,
     acodec: audio?.codec_name || null,
+    sampleRate: audio?.sample_rate || null,
+    channels: audio?.channels || null,
   };
 }
 
@@ -180,7 +184,68 @@ function compress(video, params, onProgress) {
     '-vf', `scale=-2:'min(ih,${height})'`, ...AAC], onProgress);
 }
 
-const OPERATIONS = { ingest, trim, rotate, mute, compress };
+/**
+ * Junta vários vídeos num só, pela ordem dada.
+ * Se todos tiverem o mesmo formato (ex.: clips cortados do mesmo jogo) junta sem recodificar,
+ * o que é rápido e sem perda. Caso contrário normaliza tudo para a resolução e fps do primeiro.
+ */
+async function concat(video, params, onProgress) {
+  const sources = (params.sourceIds || []).map(getVideo);
+  if (sources.length < 2) throw new Error('Escolhe pelo menos dois vídeos para juntar.');
+  if (sources.some((v) => !v?.file)) throw new Error('Um dos vídeos já não existe ou ainda não está pronto.');
+
+  const inputs = [];
+  try {
+    for (const src of sources) inputs.push(await storage.openInput(src.file));
+    const files = inputs.map((i) => i.args[i.args.length - 1]);
+    const infos = await Promise.all(files.map(probe));
+    const total = infos.reduce((s, i) => s + i.duration, 0);
+    const outName = newName(video.id, 'mp4');
+    const out = path.join(config.videosDir, outName);
+
+    const key = (i) => [i.vcodec, i.profile, i.width, i.height, i.pixFmt, i.fps, i.acodec, i.sampleRate, i.channels].join('|');
+    const sameFormat = infos.every((i) => key(i) === key(infos[0]))
+      && infos[0].vcodec === 'h264' && (!infos[0].acodec || infos[0].acodec === 'aac');
+
+    console.log(`[concat] vídeo ${video.id}: ${sources.length} partes, ${sameFormat ? 'sem recodificar' : 'a recodificar (formatos diferentes)'}`);
+    if (sameFormat) {
+      const list = path.join(config.videosDir, `${outName}.txt`);
+      fs.writeFileSync(list, files.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'));
+      try {
+        await ffmpeg(['-f', 'concat', '-safe', '0', '-i', list, '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy',
+          ...FASTSTART, out], total, onProgress);
+      } finally {
+        fs.rmSync(list, { force: true });
+      }
+      return { outName };
+    }
+
+    // Formatos diferentes: escala/enquadra tudo para o tamanho do primeiro, com áudio estéreo (silêncio se faltar).
+    const W = Math.round(infos[0].width / 2) * 2;
+    const H = Math.round(infos[0].height / 2) * 2;
+    const [num, den] = String(infos[0].fps || '25/1').split('/').map(Number);
+    const fps = num && den ? Math.min(60, num / den) : 25;
+    const args = [];
+    const filters = [];
+    let pairs = '';
+    infos.forEach((info, i) => {
+      args.push('-i', files[i]);
+      filters.push(`[${i}:v:0]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p[v${i}]`);
+      filters.push(info.acodec
+        ? `[${i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`
+        : `anullsrc=r=48000:cl=stereo,atrim=duration=${info.duration.toFixed(3)}[a${i}]`);
+      pairs += `[v${i}][a${i}]`;
+    });
+    filters.push(`${pairs}concat=n=${infos.length}:v=1:a=1[v][a]`);
+    await ffmpeg([...args, '-filter_complex', filters.join(';'), '-map', '[v]', '-map', '[a]',
+      ...h264Args(), ...AAC, ...FASTSTART, out], total, onProgress);
+    return { outName };
+  } finally {
+    inputs.forEach((i) => i.cleanup());
+  }
+}
+
+const OPERATIONS = { ingest, trim, rotate, mute, compress, concat };
 export const EDIT_TYPES = ['trim', 'rotate', 'mute', 'compress'];
 
 // ---------------------------------------------------------------------------
@@ -231,7 +296,7 @@ async function runJob(job) {
   let thumb = null;
   try {
     if (!sourceVideo) throw new Error('Vídeo de origem já não existe.');
-    if (job.type !== 'ingest' && !sourceVideo.file) throw new Error('O vídeo ainda não está pronto.');
+    if (!['ingest', 'concat'].includes(job.type) && !sourceVideo.file) throw new Error('O vídeo ainda não está pronto.');
     const result = await OPERATIONS[job.type](video, params, onProgress, sourceVideo);
     out = path.join(config.videosDir, result.outName);
     const info = await probe(out);
