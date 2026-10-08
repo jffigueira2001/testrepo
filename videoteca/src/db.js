@@ -81,6 +81,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
 `);
 
+// Migração: contas pedidas pelo site ficam 'pending' até um admin aprovar.
+if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'status')) {
+  db.exec(`ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending'))`);
+}
+
 /** Executa fn dentro de uma transação. */
 export function tx(fn) {
   db.exec('BEGIN');

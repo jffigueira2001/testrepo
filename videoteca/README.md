@@ -21,6 +21,9 @@ Plataforma web para guardar os vídeos dos jogos da equipa.
 - **Vídeos no disco do servidor ou no Google Drive.** Com o Google Drive, os vídeos ficam
   organizados em pastas `Videoteca CDE Camões / Equipa / AAAA-MM-DD vs Adversário`. O servidor só
   precisa de espaço temporário.
+- **Acesso só com conta aprovada.** Qualquer pessoa pode pedir conta em "Pedir acesso", mas só
+  entra e vê os vídeos depois de um administrador a aprovar (Administração → Pedidos de acesso).
+  Os admins também podem suspender o acesso de alguém a qualquer momento.
 - **Perfis:** *Admin* edita, apaga e gere equipas e utilizadores. *Membro* vê, descarrega,
   carrega vídeos e cria jogos.
 

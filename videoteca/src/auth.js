@@ -52,7 +52,7 @@ export function userFromCookieHeader(header) {
   const row = db.prepare(`
     SELECT u.id, u.name, u.email, u.role, s.expires_at
     FROM sessions s JOIN users u ON u.id = s.user_id
-    WHERE s.token = ?`).get(token);
+    WHERE s.token = ? AND u.status = 'active'`).get(token);
   if (!row) return null;
   if (row.expires_at < Date.now()) {
     destroySession(token);

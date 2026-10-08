@@ -131,6 +131,23 @@ test('fluxo completo: equipa → jogo → upload → processamento → edição'
   assert.equal((await call('POST', `/api/videos/${first.id}/edit`, { type: 'mute' }, member)).status, 403);
   assert.equal((await call('DELETE', `/api/videos/${first.id}`, null, member)).status, 403);
 
+  // Pedido de conta: fica pendente e não entra até um admin aprovar.
+  assert.equal((await call('POST', '/api/register', { name: 'Marta', email: 'marta@test.pt', password: 'marta1234' }, null)).status, 201);
+  assert.equal((await call('POST', '/api/register', { name: 'Marta', email: 'marta@test.pt', password: 'marta1234' }, null)).status, 400);
+  let r = await call('POST', '/api/login', { email: 'marta@test.pt', password: 'marta1234' }, null);
+  assert.equal(r.status, 403);
+  assert.match(r.data.error, /aprovada/);
+  const pendingUser = (await call('GET', '/api/users')).data.find((u) => u.email === 'marta@test.pt');
+  assert.equal(pendingUser.status, 'pending');
+  assert.equal((await call('PATCH', `/api/users/${pendingUser.id}`, { status: 'active' }, member)).status, 403);
+  assert.equal((await call('PATCH', `/api/users/${pendingUser.id}`, { status: 'active' })).status, 200);
+  const marta = await login('marta@test.pt', 'marta1234');
+  assert.equal((await call('GET', `/api/games/${game.id}`, null, marta)).status, 200);
+  // Suspender corta o acesso imediatamente (a sessão aberta deixa de valer).
+  assert.equal((await call('PATCH', `/api/users/${pendingUser.id}`, { status: 'pending' })).status, 200);
+  assert.equal((await call('GET', `/api/games/${game.id}`, null, marta)).status, 401);
+  assert.equal((await call('GET', `/api/videos/${first.id}/stream`, null, marta)).status, 401);
+
   // Admin: cortar para novo clip (preciso), cortar substituindo (rápido), rodar, tirar som, comprimir.
   const clip = (await call('POST', `/api/videos/${first.id}/edit`, { type: 'trim', params: { start: 1, end: 3, mode: 'clip', precise: true, title: 'Golo' } })).data;
   assert.notEqual(clip.videoId, first.id);

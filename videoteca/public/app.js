@@ -137,6 +137,7 @@ const thumbUrl = (v) => `/api/videos/${v.id}/thumb?v=${encodeURIComponent(v.upda
 
 const routes = [
   [/^#\/login$/, viewLogin],
+  [/^#\/register$/, viewRegister],
   [/^#\/?$/, viewLibrary],
   [/^#\/team\/(\d+)$/, (id) => viewLibrary(Number(id))],
   [/^#\/game\/(\d+)$/, (id) => viewGame(Number(id))],
@@ -152,7 +153,8 @@ async function route() {
   state.timers = [];
   const hash = location.hash || '#/';
 
-  if (!state.me && hash !== '#/login') {
+  const isPublic = hash === '#/login' || hash === '#/register';
+  if (!state.me && !isPublic) {
     try { state.me = await api('GET', '/me'); } catch { location.hash = '#/login'; return; }
   }
   document.getElementById('topbar').hidden = !state.me;
@@ -192,6 +194,11 @@ async function refreshJobsBadge() {
   const badge = document.getElementById('jobs-badge');
   badge.hidden = !active;
   badge.textContent = active;
+  // Pedidos de conta à espera de aprovação (só admins).
+  const adminBadge = document.getElementById('admin-badge');
+  const pending = isAdmin() ? (await api('GET', '/users').catch(() => [])).filter((u) => u.status === 'pending').length : 0;
+  adminBadge.hidden = !pending;
+  adminBadge.textContent = pending;
 }
 setInterval(refreshJobsBadge, 5000);
 
@@ -214,12 +221,44 @@ function viewLogin() {
       <div><label>Email</label><input name="email" type="email" autocomplete="username" required autofocus></div>
       <div><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
       <button class="primary" style="width:100%;justify-content:center">Entrar</button>
+      <p class="small muted">Ainda não tens conta? <a href="#/register">Pedir acesso</a></p>
     </form>`;
   document.getElementById('f').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.target));
     const me = await attempt(() => api('POST', '/login', fd));
     if (me) { state.me = me; location.hash = '#/'; refreshJobsBadge(); }
+  });
+}
+
+function viewRegister() {
+  document.getElementById('topbar').hidden = true;
+  $app.innerHTML = `
+    <form class="panel login stack" id="f">
+      <img src="/logo.svg" alt="" class="login-logo">
+      <h1>Pedir acesso</h1>
+      <p class="muted">Cria a tua conta. Só podes ver os vídeos depois de um administrador do clube a aprovar.</p>
+      <div><label for="r-name">Nome</label><input id="r-name" name="name" autocomplete="name" required autofocus></div>
+      <div><label for="r-email">Email</label><input id="r-email" name="email" type="email" autocomplete="email" required></div>
+      <div><label for="r-pass">Password (mín. 8 caracteres)</label><input id="r-pass" name="password" type="password" minlength="8" autocomplete="new-password" required></div>
+      <div><label for="r-pass2">Repetir password</label><input id="r-pass2" name="password2" type="password" minlength="8" autocomplete="new-password" required></div>
+      <button class="primary" style="width:100%;justify-content:center">Pedir acesso</button>
+      <p class="small muted">Já tens conta? <a href="#/login">Entrar</a></p>
+    </form>`;
+  document.getElementById('f').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(e.target));
+    if (fd.password !== fd.password2) return toast('As passwords não coincidem.', true);
+    const ok = await attempt(() => api('POST', '/register', { name: fd.name, email: fd.email, password: fd.password }));
+    if (!ok) return;
+    $app.innerHTML = `
+      <div class="panel login stack">
+        <img src="/logo.svg" alt="" class="login-logo">
+        <h1>Pedido enviado</h1>
+        <p class="muted">Um administrador do clube vai aprovar a tua conta. Depois disso entras com
+          <b>${esc(fd.email)}</b> e a password que escolheste.</p>
+        <a class="btn" href="#/login" style="justify-content:center">Voltar ao login</a>
+      </div>`;
   });
 }
 
@@ -852,9 +891,20 @@ async function viewJobs() {
 
 async function viewAdmin() {
   if (!isAdmin()) { $app.innerHTML = '<div class="empty">Só para administradores.</div>'; return; }
-  const [teams, users] = await Promise.all([loadTeams(), api('GET', '/users')]);
+  const [teams, allUsers] = await Promise.all([loadTeams(), api('GET', '/users')]);
+  const pending = allUsers.filter((u) => u.status === 'pending');
+  const users = allUsers.filter((u) => u.status === 'active');
   $app.innerHTML = `
     <h1>Administração</h1>
+    ${pending.length ? `
+    <h2>Pedidos de acesso <span class="badge">${pending.length}</span></h2>
+    <div class="panel"><table>
+      <tr><th>Nome</th><th>Email</th><th>Pedido em</th><th></th></tr>
+      ${pending.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td>
+        <td class="muted small">${esc(String(u.created_at).slice(0, 16))}</td>
+        <td style="text-align:right;white-space:nowrap"><button class="primary" data-approve="${u.id}">Aprovar</button>
+          <button class="danger" data-reject="${u.id}">Recusar</button></td></tr>`).join('')}
+    </table></div>` : ''}
     <h2>Equipas</h2>
     <div class="panel stack">
       <table>
@@ -876,6 +926,7 @@ async function viewAdmin() {
             <option value="member" ${u.role === 'member' ? 'selected' : ''}>Membro (ver + carregar)</option>
             <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin (editar + apagar)</option></select></td>
           <td style="text-align:right;white-space:nowrap"><button data-reset="${u.id}">Nova password</button>
+            ${u.id === state.me.id || u.role === 'admin' ? '' : `<button data-suspend="${u.id}">Suspender</button>`}
             ${u.id === state.me.id ? '' : `<button class="danger" data-del-user="${u.id}">Apagar</button>`}</td></tr>`).join('')}
       </table>
       <form id="new-user" class="grid-form">
@@ -887,6 +938,23 @@ async function viewAdmin() {
       </form>
     </div>`;
 
+  $app.querySelectorAll('[data-approve]').forEach((b) => b.onclick = async () => {
+    if (await attempt(() => api('PATCH', `/users/${b.dataset.approve}`, { status: 'active' }))) {
+      toast('Conta aprovada. Já pode entrar e ver os vídeos.');
+      route();
+      refreshJobsBadge();
+    }
+  });
+  $app.querySelectorAll('[data-reject]').forEach((b) => b.onclick = async () => {
+    const u = pending.find((x) => x.id === Number(b.dataset.reject));
+    if (!await ask(`Recusar o pedido de ${u.name} (${u.email})?`, { okLabel: 'Recusar' })) return;
+    if (await attempt(() => api('DELETE', `/users/${u.id}`))) { toast('Pedido recusado.'); route(); refreshJobsBadge(); }
+  });
+  $app.querySelectorAll('[data-suspend]').forEach((b) => b.onclick = async () => {
+    const u = users.find((x) => x.id === Number(b.dataset.suspend));
+    if (!await ask(`Suspender o acesso de ${u.name}? Deixa de poder entrar até voltares a aprovar a conta.`, { okLabel: 'Suspender' })) return;
+    if (await attempt(() => api('PATCH', `/users/${u.id}`, { status: 'pending' }))) { toast('Acesso suspenso.'); route(); refreshJobsBadge(); }
+  });
   document.getElementById('new-team').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (await attempt(() => api('POST', '/teams', Object.fromEntries(new FormData(e.target))))) { toast('Equipa criada.'); route(); }

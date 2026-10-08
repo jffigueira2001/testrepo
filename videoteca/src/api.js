@@ -39,9 +39,32 @@ api.post('/login', (req, res) => {
     throw new HttpError(401, 'Email ou password incorretos.');
   }
   failedLogins.delete(ip);
+  if (user.status !== 'active') {
+    throw new HttpError(403, 'A tua conta ainda não foi aprovada. Um administrador tem de a aprovar antes de poderes entrar.');
+  }
   const { token, expiresAt } = createSession(user.id);
   res.setHeader('Set-Cookie', sessionCookie(token, expiresAt));
   res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
+});
+
+// Pedido de conta: fica pendente até um administrador aprovar.
+const registrations = new Map(); // ip -> { count, until }
+
+api.post('/register', (req, res) => {
+  const r = registrations.get(req.ip);
+  if (r && r.count >= 5 && r.until > Date.now()) {
+    throw new HttpError(429, 'Demasiados pedidos de conta. Tenta novamente mais tarde.');
+  }
+  const name = str(req.body?.name, 100);
+  const email = str(req.body?.email, 200).toLowerCase();
+  const password = String(req.body?.password ?? '');
+  if (!name || !/^\S+@\S+\.\S+$/.test(email)) throw bad('Indica o teu nome e um email válido.');
+  if (password.length < 8) throw bad('A password tem de ter pelo menos 8 caracteres.');
+  if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) throw bad('Já existe uma conta com esse email.');
+  db.prepare("INSERT INTO users (name, email, password_hash, role, status) VALUES (?, ?, ?, 'member', 'pending')")
+    .run(name, email, hashPassword(password));
+  registrations.set(req.ip, { count: (r?.until > Date.now() ? r.count : 0) + 1, until: Date.now() + 3600_000 });
+  res.status(201).json({ ok: true });
 });
 
 api.post('/logout', (req, res) => {
@@ -304,7 +327,7 @@ api.get('/jobs', (_req, res) => {
 // ---------------------------------------------------------------------------
 
 api.get('/users', requireAdmin, (_req, res) => {
-  res.json(db.prepare('SELECT id, name, email, role, created_at FROM users ORDER BY name').all());
+  res.json(db.prepare("SELECT id, name, email, role, status, created_at FROM users ORDER BY status = 'active', name").all());
 });
 
 api.post('/users', requireAdmin, (req, res) => {
@@ -329,7 +352,12 @@ api.patch('/users/:id', requireAdmin, (req, res) => {
     if (n <= 1) throw bad('Tem de existir pelo menos um administrador.');
   }
   const name = req.body?.name ? str(req.body.name, 100) : user.name;
-  db.prepare('UPDATE users SET name = ?, role = ? WHERE id = ?').run(name, role, user.id);
+  // Aprovar ('active') ou suspender ('pending') o acesso.
+  const status = ['active', 'pending'].includes(req.body?.status) ? req.body.status : user.status;
+  if (status === 'pending' && user.id === req.user.id) throw bad('Não podes suspender a tua própria conta.');
+  if (status === 'pending' && user.role === 'admin') throw bad('Tira primeiro o perfil de admin a esta conta.');
+  db.prepare('UPDATE users SET name = ?, role = ?, status = ? WHERE id = ?').run(name, role, status, user.id);
+  if (status === 'pending') db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
   if (req.body?.password) {
     if (String(req.body.password).length < 8) throw bad('A password tem de ter pelo menos 8 caracteres.');
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(String(req.body.password)), user.id);
