@@ -154,6 +154,8 @@ const routes = [
 
 async function route() {
   state.timers.forEach(clearInterval);
+  state.cleanup?.();
+  state.cleanup = null;
   state.timers = [];
   const hash = location.hash || '#/';
 
@@ -491,7 +493,7 @@ function playerPicker(el, { opponent, all, selected = [] }) {
             <option value="${esc(opponent)}" ${side ? 'selected' : ''}>${esc(opponent)}</option>
           </select>
           <input data-name list="${listId}" placeholder="Nome ou n.º" aria-label="Nome ou número do jogador">
-          <button type="button" data-add>Adicionar</button>
+          <button type="button" data-add title="Adicionar jogador" aria-label="Adicionar jogador">＋</button>
         </div>
         <datalist id="${listId}">${all.filter((p) => sameClub(p) && !chosen.some((c) => c.id === p.id))
           .map((p) => `<option value="${esc(p.name)}">${p.number != null ? `n.º ${p.number}` : ''}</option>`).join('')}</datalist>
@@ -735,6 +737,58 @@ async function viewJoin() {
 }
 
 // ---------------------------------------------------------------------------
+// Velocidade de reprodução e frame a frame
+// ---------------------------------------------------------------------------
+
+const SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2];
+const FRAME = 1 / 25; // a maioria das câmaras grava a 25 fps (ou 50, onde um passo são 2 frames)
+const fmtSpeed = (r) => `${String(r).replace('.', ',')}×`;
+
+function savedSpeed() {
+  try {
+    const r = Number(localStorage.getItem('videoteca.speed'));
+    return SPEEDS.includes(r) ? r : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function setupSpeedControls(player) {
+  const buttons = [...document.querySelectorAll('[data-speed]')];
+  const setSpeed = (r) => {
+    // defaultPlaybackRate mantém a velocidade se o vídeo for recarregado.
+    player.defaultPlaybackRate = r;
+    player.playbackRate = r;
+    buttons.forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === r)));
+    try { localStorage.setItem('videoteca.speed', String(r)); } catch { /* sem armazenamento: só nesta página */ }
+  };
+  const step = (dir) => {
+    player.pause();
+    player.currentTime = Math.max(0, Math.min(player.duration || Infinity, player.currentTime + dir * FRAME));
+  };
+  setSpeed(savedSpeed());
+  buttons.forEach((b) => b.onclick = () => setSpeed(Number(b.dataset.speed)));
+  document.querySelectorAll('[data-frame]').forEach((b) => b.onclick = () => step(Number(b.dataset.frame)));
+  // Alguns browsers repõem a velocidade a 1 quando o vídeo carrega.
+  player.addEventListener('loadedmetadata', () => { player.playbackRate = player.defaultPlaybackRate; });
+
+  const onKey = (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest('input, textarea, select, [contenteditable]')) return;
+    const i = SPEEDS.indexOf(player.playbackRate);
+    if (e.key === '<') setSpeed(SPEEDS[Math.max(0, (i < 0 ? 3 : i) - 1)]);
+    else if (e.key === '>') setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, (i < 0 ? 3 : i) + 1)]);
+    else if (e.key === ',') step(-1);
+    else if (e.key === '.') step(1);
+    else if (e.key === ' ' && !e.target.closest('button, a')) { if (player.paused) player.play(); else player.pause(); }
+    else return;
+    e.preventDefault();
+  };
+  document.addEventListener('keydown', onKey);
+  state.cleanup = () => document.removeEventListener('keydown', onKey);
+}
+
+// ---------------------------------------------------------------------------
 // Vídeo: leitor + editor (admins)
 // ---------------------------------------------------------------------------
 
@@ -754,6 +808,15 @@ async function viewVideo(id) {
         ${ready
           ? `<video id="player" controls preload="metadata" playsinline poster="${thumbUrl(v)}" src="/api/videos/${v.id}/stream?v=${encodeURIComponent(v.updated_at)}"></video>`
           : `<div class="thumb panel" style="font-size:1rem">${v.status === 'error' ? `⚠️ ${esc(v.error)}` : '⏳ A processar o vídeo…'}</div>`}
+        ${ready ? `<div class="speed-bar" role="group" aria-label="Velocidade de reprodução">
+          <span class="small muted">Velocidade</span>
+          ${SPEEDS.map((r) => `<button type="button" data-speed="${r}">${fmtSpeed(r)}</button>`).join('')}
+          <span class="frame-step">
+            <button type="button" data-frame="-1" title="Frame anterior (,)" aria-label="Frame anterior">⏮</button>
+            <button type="button" data-frame="1" title="Frame seguinte (.)" aria-label="Frame seguinte">⏭</button>
+          </span>
+        </div>
+        <div class="small muted keys-hint">Teclado: <kbd>&lt;</kbd> <kbd>&gt;</kbd> velocidade · <kbd>,</kbd> <kbd>.</kbd> frame a frame · <kbd>espaço</kbd> pausa</div>` : ''}
         <div class="row small muted" style="margin-top:.5rem;gap:.6rem">
           ${STATUS_PILL[v.status]}
           <span>${fmtDuration(v.duration)}</span><span>${v.width}×${v.height}</span><span>${fmtBytes(v.size)}</span>
@@ -774,6 +837,8 @@ async function viewVideo(id) {
       if (fresh && JSON.stringify(fresh.jobs[0]) !== JSON.stringify(v.jobs[0])) route();
     });
   }
+
+  if (ready) setupSpeedControls(document.getElementById('player'));
 
   const $side = document.getElementById('side');
   if (!isAdmin()) {

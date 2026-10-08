@@ -14,6 +14,9 @@ Plataforma web para guardar os vídeos dos jogos da equipa.
   são criados na hora. Na página **Jogadores**, cada jogador tem todos os seus clips de todos os jogos.
 - **Reprodução direta no browser e no telemóvel.** Pode-se saltar para qualquer minuto sem
   descarregar o jogo inteiro.
+- **Velocidades para análise:** 0,25× · 0,5× · 0,75× · 1× · 1,5× · 2×, e avanço **frame a frame**.
+  No teclado: `<` `>` mudam a velocidade, `,` `.` avançam ou recuam um frame, `espaço` pausa. O browser
+  lembra a última velocidade escolhida.
 - **Edição na plataforma para admins:**
   - ✂️ cortar e guardar como **novo clip** (ex.: "Golo 15'"), mantendo o original, ou substituir o original;
   - corte rápido (sem perda, sem recodificar) ou preciso ao frame;
