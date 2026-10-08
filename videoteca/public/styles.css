@@ -1,3 +1,4 @@
+/* Cores do clube: --accent é a cor principal (botões, destaques) e --accent-ink o texto por cima dela. */
 :root {
   --bg: #f4f5f7; --panel: #fff; --text: #1b1f24; --muted: #667085; --line: #e3e6ea;
   --accent: #e4572e; --accent-ink: #fff; --ok: #1f9d55; --warn: #d97706; --err: #d64545;
@@ -22,7 +23,10 @@ h2 { font-size: 1.15rem; margin: 1.5rem 0 .75rem; }
 
 .topbar { display: flex; align-items: center; gap: 1.25rem; padding: .6rem 1.25rem; background: var(--panel);
   border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10; flex-wrap: wrap; }
-.brand { font-weight: 700; text-decoration: none; font-size: 1.1rem; }
+.brand { font-weight: 700; text-decoration: none; font-size: 1.1rem; display: inline-flex; align-items: center; gap: .5rem; }
+.brand-logo { height: 30px; width: auto; }
+.login-logo { height: 72px; width: auto; display: block; margin: 0 auto .25rem; }
+.login h1, .login > p { text-align: center; }
 .topbar nav { display: flex; gap: .25rem; flex: 1; flex-wrap: wrap; }
 .topbar nav a { text-decoration: none; padding: .35rem .7rem; border-radius: 6px; color: var(--muted); }
 .topbar nav a.active { background: var(--bg); color: var(--text); font-weight: 600; }

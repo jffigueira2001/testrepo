@@ -1,4 +1,4 @@
-// Videoteca Andebol — frontend (sem build: ES modules + tus-js-client global)
+// Videoteca CDE Camões — frontend (sem build: ES modules + tus-js-client global)
 
 const $app = document.getElementById('app');
 const state = { me: null, teams: [], uploads: [], timers: [] };
@@ -208,8 +208,9 @@ function viewLogin() {
   document.getElementById('topbar').hidden = true;
   $app.innerHTML = `
     <form class="panel login stack" id="f">
-      <h1>🤾 Videoteca</h1>
-      <p class="muted">Vídeos dos jogos da equipa.</p>
+      <img src="/logo.svg" alt="" class="login-logo">
+      <h1>CDE Camões</h1>
+      <p class="muted">Videoteca de andebol: os vídeos dos nossos jogos.</p>
       <div><label>Email</label><input name="email" type="email" autocomplete="username" required autofocus></div>
       <div><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
       <button class="primary" style="width:100%;justify-content:center">Entrar</button>

@@ -88,7 +88,7 @@ test('vídeos guardados no Google Drive: upload, streaming, edição e organiza�
   assert.deepEqual(fs.readdirSync(path.join(tmp, 'data/uploads')), []);
   let files = liveFiles();
   assert.equal(files.length, 1);
-  assert.equal(drive.pathOf(files[0].id), 'Videoteca Andebol/Seniores/2026-10-08 vs ABC Braga/1.ª parte.mp4');
+  assert.equal(drive.pathOf(files[0].id), 'Videoteca CDE Camões/Seniores/2026-10-08 vs ABC Braga/1.ª parte.mp4');
   assert.equal(files[0].data.length, video.size);
 
   // Streaming com Range através do servidor.
@@ -124,12 +124,12 @@ test('vídeos guardados no Google Drive: upload, streaming, edição e organiza�
   await call('PATCH', `/api/videos/${clip.videoId}`, { title: 'Golo do Rui', game_id: game2.id });
   await settle();
   const clipFile = liveFiles().find((f) => f.name === 'Golo do Rui.mp4');
-  assert.equal(drive.pathOf(clipFile.id), 'Videoteca Andebol/Seniores/2026-10-01 vs FC Porto/Golo do Rui.mp4');
+  assert.equal(drive.pathOf(clipFile.id), 'Videoteca CDE Camões/Seniores/2026-10-01 vs FC Porto/Golo do Rui.mp4');
 
   // Editar o jogo (adversário + equipa) renomeia e move a pasta.
   await call('PATCH', `/api/games/${game2.id}`, { team_id: other.id, date: '2026-10-01', opponent: 'FC Porto B' });
   await settle();
-  assert.equal(drive.pathOf(clipFile.id), 'Videoteca Andebol/Juniores/2026-10-01 vs FC Porto B/Golo do Rui.mp4');
+  assert.equal(drive.pathOf(clipFile.id), 'Videoteca CDE Camões/Juniores/2026-10-01 vs FC Porto B/Golo do Rui.mp4');
 
   // Apagar vai para a reciclagem do Drive.
   await call('DELETE', `/api/videos/${clip.videoId}`);

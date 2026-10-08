@@ -31,7 +31,7 @@ export const config = {
     refreshToken: process.env.GOOGLE_REFRESH_TOKEN || '',
     // Pasta raiz no Drive (criada automaticamente se não for indicada).
     rootFolderId: process.env.DRIVE_FOLDER_ID || '',
-    rootFolderName: process.env.DRIVE_FOLDER_NAME || 'Videoteca Andebol',
+    rootFolderName: process.env.DRIVE_FOLDER_NAME || 'Videoteca CDE Camões',
     // Tamanho de cada bloco no envio para o Drive (MB, múltiplo de 0.25).
     chunkMb: Number(process.env.DRIVE_CHUNK_MB || 64),
     // Configuráveis só para testes.

@@ -1,4 +1,4 @@
-# 🤾 Videoteca Andebol
+# Videoteca CDE Camões
 
 Plataforma web para guardar os vídeos dos jogos da equipa.
 
@@ -19,10 +19,17 @@ Plataforma web para guardar os vídeos dos jogos da equipa.
   - 🗜 comprimir para 1080p / 720p / 480p (um jogo em 4K passa de dezenas de GB para poucos GB);
   - mudar o título, mudar o vídeo de jogo e apagar.
 - **Vídeos no disco do servidor ou no Google Drive.** Com o Google Drive, os vídeos ficam
-  organizados em pastas `Videoteca Andebol / Equipa / AAAA-MM-DD vs Adversário`. O servidor só
+  organizados em pastas `Videoteca CDE Camões / Equipa / AAAA-MM-DD vs Adversário`. O servidor só
   precisa de espaço temporário.
 - **Perfis:** *Admin* edita, apaga e gere equipas e utilizadores. *Membro* vê, descarrega,
   carrega vídeos e cria jogos.
+
+## Logo e cores do clube
+
+- **Logo:** substitui `public/logo.svg` pelo emblema do clube. Se o ficheiro for PNG, guarda-o
+  como `public/logo.png` e troca `logo.svg` por `logo.png` em `public/index.html` e `public/app.js`.
+- **Cores:** muda `--accent` (cor principal) e `--accent-ink` (texto sobre a cor principal) no topo
+  de `public/styles.css`.
 
 ## Como funciona
 
@@ -111,7 +118,7 @@ Browser ──upload──▶ servidor (ffmpeg: converte, miniatura) ──▶ G
 Browser ◀──vídeo (Range)── servidor ◀──────────────────────── Google Drive
 ```
 
-- **Pastas:** `Videoteca Andebol / Seniores / 2026-10-08 vs ABC Braga / 1.ª parte.mp4`. Renomear
+- **Pastas:** `Videoteca CDE Camões / Seniores / 2026-10-08 vs ABC Braga / 1.ª parte.mp4`. Renomear
   ou mudar vídeos e jogos na plataforma também muda no Drive.
 - **Apagar** na plataforma manda o ficheiro para a **reciclagem** do Drive, onde pode ser
   recuperado durante 30 dias.
@@ -148,7 +155,7 @@ Browser ◀──vídeo (Range)── servidor ◀──────────
 4. **Colar no `.env`** essas linhas (`STORAGE=drive`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
    `GOOGLE_REFRESH_TOKEN`) e reiniciar: `docker compose up -d`.
 
-Para a equipa também ver os vídeos diretamente no Drive, partilha a pasta "Videoteca Andebol"
+Para a equipa também ver os vídeos diretamente no Drive, partilha a pasta "Videoteca CDE Camões"
 com eles, só com permissão de leitura. Não apagues ficheiros diretamente no Drive: faz isso
 na plataforma.
 
@@ -184,7 +191,7 @@ npm test
 | `TRUST_PROXY`    | `0`                      | Nº de proxies reversos à frente (ex.: `1` com Caddy) |
 | `STORAGE`        | `local`                  | `local` (disco) ou `drive` (Google Drive) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` | — | Credenciais do Drive (`npm run drive:auth`) |
-| `DRIVE_FOLDER_NAME` | `Videoteca Andebol`   | Nome da pasta raiz criada no Drive |
+| `DRIVE_FOLDER_NAME` | `Videoteca CDE Camões`   | Nome da pasta raiz criada no Drive |
 
 ## Cópias de segurança
 
