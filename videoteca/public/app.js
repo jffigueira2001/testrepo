@@ -414,7 +414,7 @@ async function viewVideo(id) {
     <div class="player-wrap" style="margin-top:.75rem">
       <div>
         ${ready
-          ? `<video id="player" controls preload="metadata" playsinline src="/api/videos/${v.id}/stream?v=${encodeURIComponent(v.updated_at)}"></video>`
+          ? `<video id="player" controls preload="metadata" playsinline poster="${thumbUrl(v)}" src="/api/videos/${v.id}/stream?v=${encodeURIComponent(v.updated_at)}"></video>`
           : `<div class="thumb panel" style="font-size:1rem">${v.status === 'error' ? `⚠️ ${esc(v.error)}` : '⏳ A processar o vídeo…'}</div>`}
         <div class="row small muted" style="margin-top:.5rem;gap:.6rem">
           ${STATUS_PILL[v.status]}
