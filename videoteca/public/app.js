@@ -193,7 +193,7 @@ window.addEventListener('beforeunload', (e) => {
 
 // Contador de trabalhos ativos no menu.
 async function refreshJobsBadge() {
-  if (!state.me) return;
+  if (!isAdmin()) return;
   const jobs = await api('GET', '/jobs').catch(() => []);
   const active = jobs.filter((j) => j.status === 'queued' || j.status === 'running').length;
   const badge = document.getElementById('jobs-badge');
@@ -335,7 +335,7 @@ async function viewLibrary() {
       <div class="row">
         <input id="q" type="search" placeholder="🔍 Adversário, jogador, competição, data…" style="width:300px">
         ${isAdmin() ? '<a class="btn" href="#/join">🎞 Juntar vídeos</a>' : ''}
-        <a class="btn primary" href="#/upload">⬆ Carregar vídeo</a>
+        ${isAdmin() ? '<a class="btn primary" href="#/upload">⬆ Carregar vídeo</a>' : ''}
       </div>
     </div>
     <div id="list"></div>`;
@@ -345,7 +345,7 @@ async function viewLibrary() {
     if (!list.length) {
       $list.innerHTML = searching
         ? '<div class="empty">Nenhum jogo encontrado.</div>'
-        : '<div class="empty">Sem jogos. Carrega o primeiro vídeo e cria o jogo nesse momento.</div>';
+        : `<div class="empty">${isAdmin() ? 'Sem jogos. Carrega o primeiro vídeo e cria o jogo nesse momento.' : 'Ainda não há jogos.'}</div>`;
       return;
     }
     $list.innerHTML = groupByMonth(list).map((m) =>
@@ -396,8 +396,8 @@ async function viewGame(id) {
         </div>
       </div>
       <div class="row">
-        <a class="btn primary" href="#/upload?game=${game.id}">⬆ Carregar para este jogo</a>
-        ${isAdmin() ? `<button id="join-game">🎞 Juntar vídeos</button>
+        ${isAdmin() ? `<a class="btn primary" href="#/upload?game=${game.id}">⬆ Carregar para este jogo</a>
+          <button id="join-game">🎞 Juntar vídeos</button>
           <button id="edit-game">Editar jogo</button><button class="danger" id="del-game">Apagar jogo</button>` : ''}
       </div>
     </div>
@@ -1028,6 +1028,7 @@ function renderUploads() {
 }
 
 async function viewUpload(presetGameId) {
+  if (!isAdmin()) { $app.innerHTML = '<div class="empty">Só os administradores podem carregar vídeos.</div>'; return; }
   const games = await api('GET', '/games');
   const preset = games.find((g) => g.id === presetGameId);
 
@@ -1130,6 +1131,7 @@ async function viewUpload(presetGameId) {
 // ---------------------------------------------------------------------------
 
 async function viewJobs() {
+  if (!isAdmin()) { $app.innerHTML = '<div class="empty">Só para administradores.</div>'; return; }
   const jobs = await api('GET', '/jobs');
   $app.innerHTML = `
     <h1>Processamento</h1>
@@ -1177,7 +1179,7 @@ async function viewAdmin() {
         <tr><th>Nome</th><th>Email</th><th>Perfil</th><th></th></tr>
         ${users.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td>
           <td><select data-role="${u.id}" style="width:auto">
-            <option value="member" ${u.role === 'member' ? 'selected' : ''}>Membro (ver + carregar)</option>
+            <option value="member" ${u.role === 'member' ? 'selected' : ''}>Membro (só ver)</option>
             <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin (editar + apagar)</option></select></td>
           <td style="text-align:right;white-space:nowrap"><button data-reset="${u.id}">Nova password</button>
             ${u.id === state.me.id || u.role === 'admin' ? '' : `<button data-suspend="${u.id}">Suspender</button>`}

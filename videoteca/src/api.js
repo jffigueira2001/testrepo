@@ -192,8 +192,8 @@ api.get('/games/:id', (req, res) => {
   res.json(game);
 });
 
-// Qualquer membro pode criar um jogo (para conseguir etiquetar o upload); editar/apagar é para admins.
-api.post('/games', (req, res) => {
+// Criar, editar e apagar jogos é para admins; os membros só veem.
+api.post('/games', requireAdmin, (req, res) => {
   const g = gameInput(req.body);
   const existing = db.prepare('SELECT id FROM games WHERE team_id = ? AND date = ? AND opponent = ? COLLATE NOCASE')
     .get(g.team_id, g.date, g.opponent);

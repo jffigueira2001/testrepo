@@ -125,12 +125,15 @@ test('fluxo completo: equipa → jogo → upload → processamento → edição'
   assert.equal(teams[0].videos, 2);
   assert.equal((await call('GET', `/api/games?team_id=${team.id}&q=Braga`)).data.length, 1);
 
-  // Membro: pode ver e carregar, não pode editar.
+  // Membro: pode ver, não pode editar.
   await call('POST', '/api/users', { name: 'Jogador', email: 'j@test.pt', password: 'jogador123', role: 'member' });
   const member = await login('j@test.pt', 'jogador123');
   assert.equal((await call('GET', `/api/games/${game.id}`, null, member)).status, 200);
   assert.equal((await call('POST', `/api/videos/${first.id}/edit`, { type: 'mute' }, member)).status, 403);
   assert.equal((await call('DELETE', `/api/videos/${first.id}`, null, member)).status, 403);
+  // Membros só veem: não carregam vídeos nem criam jogos.
+  assert.equal((await call('POST', '/api/games', { date: '2026-10-09', opponent: 'X' }, member)).status, 403);
+  await assert.rejects(upload(makeVideo('m.mp4', ['-c:v', 'libx264', '-c:a', 'aac', '-shortest']), { gameId: String(game.id) }, member), /403/);
 
   // Pedido de conta: fica pendente e não entra até um admin aprovar.
   assert.equal((await call('POST', '/api/register', { name: 'Marta', email: 'marta@test.pt', password: 'marta1234' }, null)).status, 201);

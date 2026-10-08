@@ -18,9 +18,9 @@ export const tusServer = new Server({
   relativeLocation: true,
 
   async onIncomingRequest(req) {
-    if (!userFromCookieHeader(req.headers.get('cookie'))) {
-      throw { status_code: 401, body: 'Sessão expirada. Faz login novamente.\n' };
-    }
+    const user = userFromCookieHeader(req.headers.get('cookie'));
+    if (!user) throw { status_code: 401, body: 'Sessão expirada. Faz login novamente.\n' };
+    if (user.role !== 'admin') throw { status_code: 403, body: 'Apenas administradores podem carregar vídeos.\n' };
   },
 
   async onUploadCreate(_req, upload) {

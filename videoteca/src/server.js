@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
-import { loadUser, requireAuth, ensureAdmin } from './auth.js';
+import { loadUser, requireAdmin, ensureAdmin } from './auth.js';
 import { api } from './api.js';
 import { tusServer } from './upload.js';
 import { startQueue } from './media.js';
@@ -15,7 +15,8 @@ app.set('trust proxy', config.trustProxy);
 app.use(loadUser);
 
 // Uploads retomáveis (tus). Tem de vir antes de qualquer parser de corpo.
-app.all(['/api/uploads', '/api/uploads/*rest'], requireAuth, (req, res) => tusServer.handle(req, res));
+// Só administradores carregam vídeos; os membros apenas veem.
+app.all(['/api/uploads', '/api/uploads/*rest'], requireAdmin, (req, res) => tusServer.handle(req, res));
 
 app.use('/api', api);
 

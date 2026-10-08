@@ -30,8 +30,8 @@ Plataforma web para guardar os vídeos dos jogos da equipa.
 - **Acesso só com conta aprovada.** Qualquer pessoa pode pedir conta em "Pedir acesso", mas só
   entra e vê os vídeos depois de um administrador a aprovar (Administração → Pedidos de acesso).
   Os admins também podem suspender o acesso de alguém a qualquer momento.
-- **Perfis:** *Admin* edita e apaga vídeos, associa jogadores e gere utilizadores. *Membro* vê, descarrega,
-  carrega vídeos e cria jogos.
+- **Perfis:** *Admin* carrega, corta, junta, edita e apaga vídeos, cria jogos, associa jogadores e gere
+  utilizadores. *Membro* só vê (e pode descarregar) os vídeos.
 
 ## Logo e cores do clube
 
@@ -220,8 +220,8 @@ Todas as rotas exigem sessão (cookie), exceto `POST /api/login`.
 | Método | Rota | Quem |
 |---|---|---|
 | `GET` | `/api/games?q=`, `/api/games/:id`, `/api/players`, `/api/players/:id` | todos |
-| `POST` | `/api/games` | todos |
-| `POST/PATCH/HEAD` | `/api/uploads[/:id]` (tus) | todos |
+| `POST` | `/api/games` | admin |
+| `POST/PATCH/HEAD` | `/api/uploads[/:id]` (tus) | admin |
 | `GET` | `/api/videos/:id`, `/stream`, `/download`, `/thumb` | todos |
 | `POST` | `/api/videos/:id/edit` `{type: trim\|rotate\|mute\|compress, params}` | admin |
 | `POST` | `/api/videos/concat` `{video_ids: [...], title, game_id?}` | admin |
