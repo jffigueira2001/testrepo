@@ -186,5 +186,5 @@ export async function teamFolder(teamId) {
 export async function gameFolder(gameId) {
   const game = db.prepare('SELECT * FROM games WHERE id = ?').get(gameId);
   if (!game) throw new Error('Jogo não encontrado.');
-  return ensure(`game:${game.id}`, gameFolderName(game), await teamFolder(game.team_id));
+  return ensure(`game:${game.id}`, gameFolderName(game), await rootFolder());
 }

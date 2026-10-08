@@ -72,7 +72,8 @@ label.row { flex-wrap: nowrap; margin: 0; }
 .month { margin: 1.5rem 0 .6rem; color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
 
 .player-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }
-@media (max-width: 900px) { .player-wrap { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .player-wrap { grid-template-columns: minmax(0, 1fr); } }
+.player-wrap > * { min-width: 0; }
 video { width: 100%; background: #000; border-radius: var(--radius); max-height: 75vh; }
 
 .timeline { position: relative; height: 34px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; margin: .5rem 0; }
@@ -101,3 +102,19 @@ details > summary { cursor: pointer; font-weight: 600; padding: .4rem 0; }
 .dialog::backdrop { background: rgba(10,12,16,.45); }
 .dialog p { margin: 0; }
 button.danger-solid { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
+
+.chips { display: inline-flex; flex-wrap: wrap; gap: .3rem; }
+.card .chips { margin-top: .4rem; }
+.chip { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; line-height: 1.2; padding: .15rem .55rem;
+  border-radius: 99px; border: 1px solid var(--line); background: var(--panel); color: var(--text); text-decoration: none; }
+.chip small { color: var(--muted); font-size: .7rem; }
+.chip.own { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+a.chip:hover { border-color: var(--muted); }
+.chip-x { border: 0; background: none; padding: 0 0 0 .1rem; font-size: 1rem; line-height: 1; color: var(--muted); cursor: pointer; }
+.picker { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; }
+.picker-row { flex-wrap: nowrap; gap: .4rem; }
+.picker-row select { width: auto; max-width: 42%; flex: none; }
+.picker-row input { flex: 1; min-width: 0; width: auto; }
+.picker-row button { flex: none; padding-inline: .7rem; }
+.num { text-align: right; font-variant-numeric: tabular-nums; width: 4.5rem; }
+h3.month { margin-top: 1rem; }

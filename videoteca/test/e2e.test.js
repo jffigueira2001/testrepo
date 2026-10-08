@@ -85,8 +85,9 @@ test('fluxo completo: equipa → jogo → upload → processamento → edição'
   assert.equal((await call('GET', '/api/teams', null, null)).status, 401);
   await assert.rejects(upload(makeVideo('x.mp4', ['-c:v', 'libx264', '-c:a', 'aac', '-shortest']), { gameId: '1' }, 'vt_session=nope'));
 
-  const team = (await call('POST', '/api/teams', { name: 'Seniores' })).data;
-  const game = (await call('POST', '/api/games', { team_id: team.id, date: '2026-10-08', opponent: 'ABC Braga', competition: 'Campeonato', venue: 'casa' })).data;
+  const team = (await call('GET', '/api/teams')).data[0]; // equipa única criada no arranque
+  // Sem escalões: o jogo vai para a equipa única sem ser preciso indicá-la.
+  const game = (await call('POST', '/api/games', { date: '2026-10-08', opponent: 'ABC Braga', competition: 'Campeonato', venue: 'casa' })).data;
   assert.ok(game.id);
   // Criar o mesmo jogo duas vezes devolve o existente.
   assert.equal((await call('POST', '/api/games', { team_id: team.id, date: '2026-10-08', opponent: 'abc braga' })).data.id, game.id);
@@ -148,8 +149,26 @@ test('fluxo completo: equipa → jogo → upload → processamento → edição'
   assert.equal((await call('GET', `/api/games/${game.id}`, null, marta)).status, 401);
   assert.equal((await call('GET', `/api/videos/${first.id}/stream`, null, marta)).status, 401);
 
-  // Admin: cortar para novo clip (preciso), cortar substituindo (rápido), rodar, tirar som, comprimir.
-  const clip = (await call('POST', `/api/videos/${first.id}/edit`, { type: 'trim', params: { start: 1, end: 3, mode: 'clip', precise: true, title: 'Golo' } })).data;
+  // Jogadores: do nosso clube (club '') e do adversário; criar duas vezes devolve o mesmo.
+  const rui = (await call('POST', '/api/players', { name: 'Rui Silva', number: 7, club: '' })).data;
+  const ze = (await call('POST', '/api/players', { name: 'Zé Costa', club: 'ABC Braga' })).data;
+  assert.equal((await call('POST', '/api/players', { name: 'rui silva', club: '' })).data.id, rui.id);
+  assert.equal((await call('POST', '/api/players', { name: 'Rui Silva', club: 'ABC Braga' })).status, 201); // homónimo noutro clube
+  assert.equal((await call('POST', '/api/players', { name: 'X', number: 120 })).status, 400);
+  assert.equal((await call('POST', '/api/players', { name: 'Y' }, member)).status, 403);
+
+  // Admin: cortar para novo clip (preciso, com jogadores), cortar substituindo (rápido), rodar, tirar som, comprimir.
+  const clip = (await call('POST', `/api/videos/${first.id}/edit`, { type: 'trim', params: { start: 1, end: 3, mode: 'clip', precise: true, title: 'Golo', playerIds: [rui.id, ze.id] } })).data;
+  const tagged = (await call('GET', `/api/videos/${clip.videoId}`)).data.players;
+  assert.deepEqual(tagged.map((p) => p.name), ['Rui Silva', 'Zé Costa']); // o nosso clube primeiro
+  const ruiPage = (await call('GET', `/api/players/${rui.id}`, null, member)).data;
+  assert.deepEqual(ruiPage.videos.map((v) => v.id), [clip.videoId]);
+  assert.equal(ruiPage.videos[0].opponent, 'ABC Braga');
+  assert.equal((await call('GET', `/api/games?q=Zé Costa`)).data.length, 1);
+  assert.equal((await call('PUT', `/api/videos/${clip.videoId}/players`, { player_ids: [ze.id] }, member)).status, 403);
+  assert.equal((await call('PUT', `/api/videos/${clip.videoId}/players`, { player_ids: [ze.id] })).status, 200);
+  assert.deepEqual((await call('GET', `/api/videos/${clip.videoId}`)).data.players.map((p) => p.id), [ze.id]);
+  assert.equal((await call('GET', '/api/players')).data.find((p) => p.id === rui.id).clips, 0);
   assert.notEqual(clip.videoId, first.id);
   const second = vids.find((v) => v.id !== first.id);
   assert.equal((await call('POST', `/api/videos/${second.id}/edit`, { type: 'trim', params: { start: 0, end: 4, mode: 'replace' } })).status, 202);

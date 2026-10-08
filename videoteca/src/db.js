@@ -86,6 +86,35 @@ if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'status
   db.exec(`ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending'))`);
 }
 
+// Jogadores (do clube ou adversários) e a sua associação aos clips.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS players (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    number     INTEGER,
+    club       TEXT NOT NULL DEFAULT '' COLLATE NOCASE,   -- '' = o nosso clube; senão o nome do adversário
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (name COLLATE NOCASE, club)
+  );
+  CREATE TABLE IF NOT EXISTS video_players (
+    video_id  INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    PRIMARY KEY (video_id, player_id)
+  );
+  CREATE INDEX IF NOT EXISTS video_players_player ON video_players(player_id);
+`);
+
+/**
+ * O clube só tem uma equipa (seniores). A tabela teams mantém-se por compatibilidade,
+ * mas a interface já não pede o escalão: todos os jogos ficam nesta equipa.
+ */
+export function defaultTeamId() {
+  const row = db.prepare('SELECT id FROM teams ORDER BY id LIMIT 1').get();
+  if (row) return row.id;
+  return Number(db.prepare("INSERT INTO teams (name) VALUES ('Seniores')").run().lastInsertRowid);
+}
+defaultTeamId();
+
 /** Executa fn dentro de uma transação. */
 export function tx(fn) {
   db.exec('BEGIN');

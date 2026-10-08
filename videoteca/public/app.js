@@ -45,6 +45,7 @@ function fmtBytes(n) {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+const CLUB = 'CDE Camões';
 const VENUE = { casa: 'Casa', fora: 'Fora', neutro: 'Neutro' };
 const JOB_LABEL = { ingest: 'Processar upload', trim: 'Cortar', rotate: 'Rodar', mute: 'Remover som', compress: 'Comprimir' };
 const STATUS_PILL = {
@@ -139,7 +140,9 @@ const routes = [
   [/^#\/login$/, viewLogin],
   [/^#\/register$/, viewRegister],
   [/^#\/?$/, viewLibrary],
-  [/^#\/team\/(\d+)$/, (id) => viewLibrary(Number(id))],
+  [/^#\/team\/(\d+)$/, () => viewLibrary()],
+  [/^#\/players$/, viewPlayers],
+  [/^#\/player\/(\d+)$/, (id) => viewPlayer(Number(id))],
   [/^#\/game\/(\d+)$/, (id) => viewGame(Number(id))],
   [/^#\/video\/(\d+)$/, (id) => viewVideo(Number(id))],
   [/^#\/upload(?:\?game=(\d+))?$/, (id) => viewUpload(id ? Number(id) : null)],
@@ -161,7 +164,8 @@ async function route() {
   if (state.me) {
     document.getElementById('me-name').textContent = `${state.me.name}${isAdmin() ? ' (admin)' : ''}`;
     document.querySelectorAll('[data-admin]').forEach((el) => { el.hidden = !isAdmin(); });
-    const section = hash.startsWith('#/upload') ? 'upload' : hash.startsWith('#/jobs') ? 'jobs' : hash.startsWith('#/admin') ? 'admin' : 'library';
+    const section = hash.startsWith('#/upload') ? 'upload' : hash.startsWith('#/jobs') ? 'jobs' : hash.startsWith('#/admin') ? 'admin'
+      : hash.startsWith('#/player') ? 'players' : 'library';
     document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === section));
   }
 
@@ -292,7 +296,7 @@ function gameCard(g) {
         ${g.duration ? `<span class="dur">${fmtDuration(g.duration)}</span>` : ''}</div>
       <div class="body">
         <div class="date">${fmtDate(g.date)}</div>
-        <div>${esc(g.team_name)} vs <strong>${esc(g.opponent)}</strong></div>
+        <div>${CLUB} vs <strong>${esc(g.opponent)}</strong></div>
         <div class="row small muted" style="margin-top:.3rem;gap:.4rem">
           ${g.competition ? `<span class="pill">${esc(g.competition)}</span>` : ''}
           <span class="pill">${VENUE[g.venue]}</span>
@@ -317,55 +321,33 @@ function groupByMonth(games) {
   return out;
 }
 
-async function viewLibrary(teamId = null) {
-  const [teams, games] = await Promise.all([loadTeams(), api('GET', `/games${teamId ? `?team_id=${teamId}` : ''}`)]);
-  const team = teams.find((t) => t.id === teamId);
+async function viewLibrary() {
+  const games = await api('GET', '/games');
+  const videos = games.reduce((n, g) => n + g.videos, 0);
 
   $app.innerHTML = `
     <div class="row spread">
       <div>
-        <h1>${team ? esc(team.name) : 'Biblioteca'}</h1>
-        <div class="muted small">${team
-          ? `${team.games} jogos · ${team.videos} vídeos · ${fmtBytes(team.bytes)}`
-          : `${teams.length} equipas · ${games.length} jogos`}</div>
+        <h1>Biblioteca</h1>
+        <div class="muted small">${games.length} jogos · ${videos} vídeos</div>
       </div>
       <div class="row">
-        <input id="q" type="search" placeholder="🔍 Adversário, competição, data…" style="width:280px">
+        <input id="q" type="search" placeholder="🔍 Adversário, jogador, competição, data…" style="width:300px">
         <a class="btn primary" href="#/upload">⬆ Carregar vídeo</a>
       </div>
     </div>
-    <div class="tabs">
-      <button class="${teamId ? '' : 'active'}" data-team="">Todas</button>
-      ${teams.map((t) => `<button class="${t.id === teamId ? 'active' : ''}" data-team="${t.id}">${esc(t.name)}</button>`).join('')}
-    </div>
     <div id="list"></div>`;
 
-  $app.querySelectorAll('[data-team]').forEach((b) =>
-    b.addEventListener('click', () => { location.hash = b.dataset.team ? `#/team/${b.dataset.team}` : '#/'; }));
-
-  const render = (list) => {
+  const render = (list, searching = false) => {
     const $list = document.getElementById('list');
-    if (!teams.length) {
-      $list.innerHTML = `<div class="empty">Ainda não há equipas.
-        ${isAdmin() ? '<br><br><a class="btn primary" href="#/admin">Criar a primeira equipa</a>' : 'Pede a um administrador para criar as equipas.'}</div>`;
-      return;
-    }
     if (!list.length) {
-      $list.innerHTML = '<div class="empty">Sem jogos. Carrega o primeiro vídeo e cria o jogo nesse momento.</div>';
+      $list.innerHTML = searching
+        ? '<div class="empty">Nenhum jogo encontrado.</div>'
+        : '<div class="empty">Sem jogos. Carrega o primeiro vídeo e cria o jogo nesse momento.</div>';
       return;
     }
-    if (teamId) {
-      $list.innerHTML = groupByMonth(list).map((m) =>
-        `<div class="month">${m.label}</div><div class="cards">${m.games.map(gameCard).join('')}</div>`).join('');
-    } else {
-      // Vista geral: agrupado por equipa.
-      $list.innerHTML = teams.map((t) => {
-        const tg = list.filter((g) => g.team_id === t.id);
-        if (!tg.length) return '';
-        return `<h2><a href="#/team/${t.id}">${esc(t.name)}</a> <span class="muted small">${tg.length} jogos</span></h2>
-                <div class="cards">${tg.map(gameCard).join('')}</div>`;
-      }).join('');
-    }
+    $list.innerHTML = groupByMonth(list).map((m) =>
+      `<div class="month">${m.label}</div><div class="cards">${m.games.map(gameCard).join('')}</div>`).join('');
   };
   render(games);
 
@@ -374,10 +356,7 @@ async function viewLibrary(teamId = null) {
     clearTimeout(debounce);
     debounce = setTimeout(async () => {
       const q = e.target.value.trim();
-      const params = new URLSearchParams();
-      if (teamId) params.set('team_id', teamId);
-      if (q) params.set('q', q);
-      render(await api('GET', `/games?${params}`));
+      render(q ? await api('GET', `/games?q=${encodeURIComponent(q)}`) : games, !!q);
     }, 250);
   });
 }
@@ -386,12 +365,9 @@ async function viewLibrary(teamId = null) {
 // Jogo
 // ---------------------------------------------------------------------------
 
-function gameForm(g = {}, teams = state.teams) {
+function gameForm(g = {}) {
   return `
     <div class="grid-form">
-      <div><label>Equipa</label><select name="team_id" required>
-        ${teams.map((t) => `<option value="${t.id}" ${t.id === g.team_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
-      </select></div>
       <div><label>Data do jogo</label><input name="date" type="date" required value="${esc(g.date || today())}"></div>
       <div><label>Adversário</label><input name="opponent" required value="${esc(g.opponent || '')}" placeholder="ex.: ABC Braga"></div>
       <div><label>Competição</label><input name="competition" value="${esc(g.competition || '')}" placeholder="ex.: Campeonato, Taça…"></div>
@@ -402,12 +378,12 @@ function gameForm(g = {}, teams = state.teams) {
 }
 
 async function viewGame(id) {
-  const [game] = await Promise.all([api('GET', `/games/${id}`), loadTeams()]);
+  const game = await api('GET', `/games/${id}`);
   const jobsByVideo = {};
   for (const j of game.jobs) (jobsByVideo[j.video_id] ||= []).push(j);
 
   $app.innerHTML = `
-    <div class="small muted"><a href="#/team/${game.team_id}">${esc(game.team_name)}</a> ›</div>
+    <div class="small muted"><a href="#/">Biblioteca</a> ›</div>
     <div class="row spread">
       <div>
         <h1>${fmtDate(game.date)} · vs ${esc(game.opponent)}</h1>
@@ -444,6 +420,7 @@ async function viewGame(id) {
             <span>${fmtBytes(v.size)}</span>
             ${v.height ? `<span>${v.height}p</span>` : ''}
           </div>
+          ${playerChips(v.players)}
           ${job ? `<div class="small muted" style="margin-top:.4rem">${JOB_LABEL[job.type]}: ${Math.round(job.progress * 100)}%
             <div class="progress"><div style="width:${job.progress * 100}%"></div></div></div>` : ''}
           ${v.status === 'error' ? `<div class="small" style="color:var(--err)">${esc(v.error)}</div>` : ''}
@@ -468,8 +445,153 @@ async function viewGame(id) {
   });
   document.getElementById('del-game').onclick = async () => {
     if (!await ask(`Apagar o jogo e TODOS os ${game.videos.length} vídeos? Não há volta atrás.`)) return;
-    if (await attempt(() => api('DELETE', `/games/${id}`))) { toast('Jogo apagado.'); location.hash = `#/team/${game.team_id}`; }
+    if (await attempt(() => api('DELETE', `/games/${id}`))) { toast('Jogo apagado.'); location.hash = '#/'; }
   };
+}
+
+// ---------------------------------------------------------------------------
+// Jogadores: etiquetas nos clips (do clube ou do adversário)
+// ---------------------------------------------------------------------------
+
+const playerLabel = (p) => `${p.number != null ? `${p.number} · ` : ''}${p.name}`;
+
+/** Etiquetas de jogadores. linked=true torna-as links para a página do jogador. */
+function playerChips(players = [], linked = false) {
+  if (!players.length) return '';
+  const tag = linked ? 'a' : 'span';
+  return `<span class="chips">${players.map((p) => `<${tag} class="chip ${p.club ? 'opp' : 'own'}"
+    ${linked ? `href="#/player/${p.id}"` : ''} title="${esc(p.club || CLUB)}">${esc(playerLabel(p))}${p.club ? ` <small>${esc(p.club)}</small>` : ''}</${tag}>`).join('')}</span>`;
+}
+
+let pickerSeq = 0;
+
+/**
+ * Seletor de jogadores para um clip: escolhe-se o lado (o nosso clube ou o adversário do jogo)
+ * e escreve-se o nome ou o número. Nomes novos são criados quando se guarda (ids()).
+ */
+function playerPicker(el, { opponent, all, selected = [] }) {
+  const listId = `players-${++pickerSeq}`;
+  const chosen = selected.map((p) => ({ ...p }));
+  let side = '';
+  const sameClub = (p) => (p.club || '').toLowerCase() === side.toLowerCase();
+
+  function render() {
+    el.innerHTML = `
+      <div class="picker">
+        <div class="chips">${chosen.map((p, i) => `<span class="chip ${p.club ? 'opp' : 'own'}">${esc(playerLabel(p))}${p.club ? ` <small>${esc(p.club)}</small>` : ''}${p.id ? '' : ' <small>(novo)</small>'}
+          <button type="button" class="chip-x" data-rm="${i}" aria-label="Remover ${esc(p.name)}">×</button></span>`).join('')
+          || '<span class="small muted">Nenhum jogador.</span>'}</div>
+        <div class="row picker-row">
+          <select data-side aria-label="Equipa do jogador">
+            <option value="" ${side ? '' : 'selected'}>${CLUB}</option>
+            <option value="${esc(opponent)}" ${side ? 'selected' : ''}>${esc(opponent)}</option>
+          </select>
+          <input data-name list="${listId}" placeholder="Nome ou n.º" aria-label="Nome ou número do jogador">
+          <button type="button" data-add>Adicionar</button>
+        </div>
+        <datalist id="${listId}">${all.filter((p) => sameClub(p) && !chosen.some((c) => c.id === p.id))
+          .map((p) => `<option value="${esc(p.name)}">${p.number != null ? `n.º ${p.number}` : ''}</option>`).join('')}</datalist>
+      </div>`;
+    el.querySelector('[data-side]').onchange = (e) => { side = e.target.value; render(); el.querySelector('[data-name]').focus(); };
+    el.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => { chosen.splice(Number(b.dataset.rm), 1); render(); });
+    const input = el.querySelector('[data-name]');
+    const add = () => {
+      const text = input.value.trim();
+      if (!text) return;
+      const byNumber = /^\d{1,2}$/.test(text) ? all.find((p) => sameClub(p) && p.number === Number(text)) : null;
+      const found = byNumber || all.find((p) => sameClub(p) && p.name.toLowerCase() === text.toLowerCase());
+      const pick = found || { id: null, name: text, number: null, club: side };
+      if (!chosen.some((c) => (c.id && c.id === pick.id) || (!c.id && !pick.id && c.name.toLowerCase() === pick.name.toLowerCase() && sameClub(c)))) {
+        chosen.push(pick);
+      }
+      render();
+      el.querySelector('[data-name]').focus();
+    };
+    el.querySelector('[data-add]').onclick = add;
+    input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
+  }
+  render();
+
+  return {
+    /** Cria os jogadores novos e devolve os ids de todos os escolhidos. */
+    async ids() {
+      for (const p of chosen) {
+        if (!p.id) {
+          p.id = (await api('POST', '/players', { name: p.name, club: p.club })).id;
+          all.push({ ...p });
+        }
+      }
+      return chosen.map((p) => p.id);
+    },
+  };
+}
+
+async function viewPlayers() {
+  const players = await api('GET', '/players');
+  const own = players.filter((p) => !p.club);
+  const clubs = [...new Set(players.filter((p) => p.club).map((p) => p.club))].sort((a, b) => a.localeCompare(b));
+  const row = (p) => `<tr>
+      <td class="num">${p.number ?? ''}</td>
+      <td><a href="#/player/${p.id}">${esc(p.name)}</a></td>
+      <td class="num">${p.clips} clip${p.clips === 1 ? '' : 's'}</td>
+      ${isAdmin() ? `<td style="text-align:right;white-space:nowrap"><button data-edit-player="${p.id}">Editar</button>
+        <button class="danger" data-del-player="${p.id}">Apagar</button></td>` : ''}</tr>`;
+  const table = (list) => `<div class="panel"><table>
+      <tr><th class="num">N.º</th><th>Nome</th><th class="num">Clips</th>${isAdmin() ? '<th></th>' : ''}</tr>
+      ${list.map(row).join('')}</table></div>`;
+
+  $app.innerHTML = `
+    <h1>Jogadores</h1>
+    <p class="muted">Os jogadores são associados aos clips quando um administrador os corta. Abre um jogador para ver todos os clips dele.</p>
+    <h2>${CLUB}</h2>
+    ${own.length ? table(own) : '<div class="empty">Ainda não há jogadores do clube.</div>'}
+    ${isAdmin() ? `
+    <form id="new-player" class="panel grid-form" style="margin-top:.75rem">
+      <div><label for="np-name">Nome</label><input id="np-name" name="name" required></div>
+      <div><label for="np-number">N.º camisola</label><input id="np-number" name="number" type="number" min="0" max="99"></div>
+      <div style="align-self:end"><button class="primary">Adicionar jogador do ${CLUB}</button></div>
+    </form>` : ''}
+    <h2>Adversários</h2>
+    ${clubs.length ? clubs.map((c) => `<h3 class="month">${esc(c)}</h3>${table(players.filter((p) => p.club === c))}`).join('')
+      : '<div class="empty">Os jogadores adversários aparecem aqui quando forem associados a um clip.</div>'}`;
+
+  if (!isAdmin()) return;
+  document.getElementById('new-player').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(e.target));
+    if (await attempt(() => api('POST', '/players', { ...fd, club: '' }))) { toast('Jogador adicionado.'); route(); }
+  });
+  $app.querySelectorAll('[data-edit-player]').forEach((b) => b.onclick = async () => {
+    const p = players.find((x) => x.id === Number(b.dataset.editPlayer));
+    const name = await askText('Nome do jogador:', p.name);
+    if (name === null) return;
+    const number = await askText('Número da camisola (deixa vazio se não souberes):', p.number ?? '', 'number');
+    if (number === null) return;
+    if (await attempt(() => api('PATCH', `/players/${p.id}`, { name: name || p.name, number, club: p.club }))) { toast('Jogador atualizado.'); route(); }
+  });
+  $app.querySelectorAll('[data-del-player]').forEach((b) => b.onclick = async () => {
+    const p = players.find((x) => x.id === Number(b.dataset.delPlayer));
+    if (!await ask(`Apagar ${p.name}? Os clips continuam, só perdem esta etiqueta.`)) return;
+    if (await attempt(() => api('DELETE', `/players/${p.id}`))) { toast('Jogador apagado.'); route(); }
+  });
+}
+
+async function viewPlayer(id) {
+  const p = await api('GET', `/players/${id}`);
+  $app.innerHTML = `
+    <div class="small muted"><a href="#/players">Jogadores</a> ›</div>
+    <h1>${p.number != null ? `<span class="muted">${p.number}</span> ` : ''}${esc(p.name)}</h1>
+    <div class="muted small">${esc(p.club || CLUB)} · ${p.videos.length} clip${p.videos.length === 1 ? '' : 's'}</div>
+    ${p.videos.length ? `<div class="cards" style="margin-top:1rem">${p.videos.map((v) => `
+      <a class="card" href="#/video/${v.id}">
+        <div class="thumb" ${v.has_thumb ? `style="background-image:url('${thumbUrl(v)}')"` : ''}>${v.has_thumb ? '' : '⏳'}
+          ${v.duration ? `<span class="dur">${fmtDuration(v.duration)}</span>` : ''}</div>
+        <div class="body">
+          <div style="font-weight:600">${esc(v.title)}</div>
+          <div class="small muted">${fmtDate(v.date)} · vs ${esc(v.opponent)}</div>
+          ${playerChips(v.players)}
+        </div>
+      </a>`).join('')}</div>` : '<div class="empty">Ainda não há clips com este jogador.</div>'}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -483,7 +605,7 @@ async function viewVideo(id) {
   const ready = v.status === 'ready';
 
   $app.innerHTML = `
-    <div class="small muted"><a href="#/team/${game.team_id}">${esc(game.team_name)}</a> ›
+    <div class="small muted"><a href="#/">Biblioteca</a> ›
       <a href="#/game/${game.id}">${fmtDate(game.date)} vs ${esc(game.opponent)}</a> ›</div>
     <div class="row spread"><h1>${esc(v.title)}</h1>
       <div class="row">${ready ? `<a class="btn" href="/api/videos/${v.id}/download">⬇ Descarregar</a>` : ''}</div></div>
@@ -497,6 +619,7 @@ async function viewVideo(id) {
           <span>${fmtDuration(v.duration)}</span><span>${v.width}×${v.height}</span><span>${fmtBytes(v.size)}</span>
           <span>Ficheiro original: ${esc(v.original_name)}</span>
         </div>
+        ${v.players.length ? `<div class="row small" style="margin-top:.6rem;gap:.4rem"><span class="muted">Jogadores:</span>${playerChips(v.players, true)}</div>` : ''}
         ${activeJob ? `<div class="panel" style="margin-top:.75rem">
           <strong>${JOB_LABEL[activeJob.type]}</strong> — ${activeJob.status === 'queued' ? 'em fila' : `${Math.round(activeJob.progress * 100)}%`}
           <div class="progress" style="margin-top:.4rem"><div style="width:${activeJob.progress * 100}%"></div></div>
@@ -518,8 +641,7 @@ async function viewVideo(id) {
     return;
   }
 
-  const teams = await loadTeams();
-  const allGames = await api('GET', '/games');
+  const [allGames, allPlayers] = await Promise.all([api('GET', '/games'), api('GET', '/players')]);
   $side.innerHTML = `
     <div class="panel stack">
       <strong>✂️ Cortar</strong>
@@ -535,7 +657,8 @@ async function viewVideo(id) {
       </div>
       <div class="small" id="t-len"></div>
       <label class="row" style="gap:.4rem;color:var(--text)"><input type="radio" name="mode" value="clip" checked><span>Guardar como <b>novo clip</b> (mantém o original)</span></label>
-      <input id="clip-title" placeholder="Título do clip (ex.: 2.ª parte, Golo 15')">
+      <input id="clip-title" placeholder="Título do clip (ex.: Golo 15', Defesa, Contra-ataque)">
+      <div><label>Jogadores no clip</label><div id="clip-players"></div></div>
       <label class="row" style="gap:.4rem;color:var(--text)"><input type="radio" name="mode" value="replace"><span>Substituir o vídeo original</span></label>
       <label class="row small" style="gap:.4rem;flex-wrap:nowrap"><input type="checkbox" id="precise"><span>Corte preciso ao frame (mais lento: recodifica)</span></label>
       <button class="primary" id="do-trim" ${ready ? '' : 'disabled'}>Cortar</button>
@@ -562,9 +685,9 @@ async function viewVideo(id) {
       <strong>📝 Detalhes</strong>
       <div><label>Título</label><input name="title" value="${esc(v.title)}" required></div>
       <div><label>Jogo</label><select name="game_id">
-        ${teams.map((t) => `<optgroup label="${esc(t.name)}">${allGames.filter((g) => g.team_id === t.id).map((g) =>
-          `<option value="${g.id}" ${g.id === v.game_id ? 'selected' : ''}>${fmtDate(g.date)} vs ${esc(g.opponent)}</option>`).join('')}</optgroup>`).join('')}
+        ${allGames.map((g) => `<option value="${g.id}" ${g.id === v.game_id ? 'selected' : ''}>${fmtDate(g.date)} vs ${esc(g.opponent)}</option>`).join('')}
       </select></div>
+      <div><label>Jogadores</label><div id="video-players"></div></div>
       <div class="row spread"><button class="primary">Guardar</button><button type="button" class="danger" id="del">Apagar vídeo</button></div>
     </form>
 
@@ -573,6 +696,9 @@ async function viewVideo(id) {
         <td class="muted">${esc((j.finished_at || j.created_at || '').replace('T', ' ').slice(0, 16))}</td></tr>
         ${j.error ? `<tr><td colspan="3" style="color:var(--err)">${esc(j.error)}</td></tr>` : ''}`).join('')}</table>` : '<p class="muted small">Sem edições.</p>'}
     </details>`;
+
+  const clipPicker = playerPicker(document.getElementById('clip-players'), { opponent: game.opponent, all: allPlayers });
+  const videoPicker = playerPicker(document.getElementById('video-players'), { opponent: game.opponent, all: allPlayers, selected: v.players });
 
   // --- Corte
   const player = document.getElementById('player');
@@ -628,8 +754,10 @@ async function viewVideo(id) {
     if (!(end > start)) return toast('O fim tem de ser depois do início.', true);
     const mode = $side.querySelector('input[name=mode]:checked').value;
     if (mode === 'replace' && !await ask('Substituir o vídeo original pela parte selecionada? O resto é apagado.')) return;
+    const playerIds = mode === 'clip' ? await attempt(() => clipPicker.ids()) : [];
+    if (!playerIds) return;
     submitEdit('trim', { start, end, mode, precise: document.getElementById('precise').checked,
-      title: document.getElementById('clip-title').value });
+      title: document.getElementById('clip-title').value, playerIds });
   };
 
   $side.querySelectorAll('[data-op]').forEach((b) => b.addEventListener('click', async () => {
@@ -643,7 +771,12 @@ async function viewVideo(id) {
   document.getElementById('meta').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.target));
-    if (await attempt(() => api('PATCH', `/videos/${id}`, { title: fd.title, game_id: Number(fd.game_id) }))) { toast('Guardado.'); route(); }
+    const saved = await attempt(async () => {
+      await api('PATCH', `/videos/${id}`, { title: fd.title, game_id: Number(fd.game_id) });
+      await api('PUT', `/videos/${id}/players`, { player_ids: await videoPicker.ids() });
+      return true;
+    });
+    if (saved) { toast('Guardado.'); route(); }
   });
   document.getElementById('del').onclick = async () => {
     if (!await ask('Apagar este vídeo definitivamente?')) return;
@@ -751,14 +884,8 @@ function renderUploads() {
 }
 
 async function viewUpload(presetGameId) {
-  const teams = await loadTeams();
   const games = await api('GET', '/games');
   const preset = games.find((g) => g.id === presetGameId);
-
-  if (!teams.length) {
-    $app.innerHTML = `<div class="empty">Ainda não há equipas. ${isAdmin() ? '<a href="#/admin">Cria uma equipa primeiro.</a>' : 'Pede a um administrador para criar as equipas.'}</div>`;
-    return;
-  }
 
   $app.innerHTML = `
     <h1>Carregar vídeos</h1>
@@ -766,12 +893,7 @@ async function viewUpload(presetGameId) {
       Não feches o separador até terminar (podes navegar na aplicação).</p>
     <div class="panel stack">
       <strong>1. A que jogo pertence?</strong>
-      <div class="grid-form">
-        <div><label>Equipa</label><select id="u-team">
-          ${teams.map((t) => `<option value="${t.id}" ${t.id === (preset?.team_id ?? teams[0].id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
-        </select></div>
-        <div><label>Jogo</label><select id="u-game"></select></div>
-      </div>
+      <div><label for="u-game">Jogo</label><select id="u-game"></select></div>
       <form id="new-game" class="stack" hidden>
         <div class="small muted">Novo jogo:</div>
         <div class="grid-form">
@@ -794,18 +916,16 @@ async function viewUpload(presetGameId) {
     </div>
     <div id="uploads"></div>`;
 
-  const $team = document.getElementById('u-team');
   const $game = document.getElementById('u-game');
   const $newGame = document.getElementById('new-game');
   const fillGames = (selectId) => {
-    const tg = games.filter((g) => g.team_id === Number($team.value));
+    const tg = games;
     $game.innerHTML = `<option value="new">➕ Novo jogo…</option>${tg.map((g) =>
       `<option value="${g.id}" ${g.id === selectId ? 'selected' : ''}>${fmtDate(g.date)} vs ${esc(g.opponent)}${g.competition ? ` (${esc(g.competition)})` : ''}</option>`).join('')}`;
     if (!selectId && tg.length && tg[0].date === today()) $game.value = tg[0].id;
     $newGame.hidden = $game.value !== 'new';
   };
   fillGames(preset?.id);
-  $team.onchange = () => fillGames();
   $game.onchange = () => { $newGame.hidden = $game.value !== 'new'; };
 
   let picked = [];
@@ -841,16 +961,15 @@ async function viewUpload(presetGameId) {
     let gameLabel = $game.selectedOptions[0]?.textContent;
     if (gameId === 'new') {
       if (!$newGame.reportValidity()) return;
-      const body = { ...Object.fromEntries(new FormData($newGame)), team_id: Number($team.value) };
+      const body = Object.fromEntries(new FormData($newGame));
       const r = await attempt(() => api('POST', '/games', body));
       if (!r) return;
       gameId = r.id;
       gameLabel = `${fmtDate(body.date)} vs ${body.opponent}`;
     }
-    const teamName = $team.selectedOptions[0].textContent;
     for (const p of picked) {
       state.uploads.push({ file: p.file, title: p.title || p.file.name, gameId: Number(gameId),
-        gameLabel: `${teamName} · ${gameLabel}`, status: 'waiting', sent: 0, total: p.file.size });
+        gameLabel, status: 'waiting', sent: 0, total: p.file.size });
     }
     picked = [];
     renderPicked();
@@ -876,7 +995,7 @@ async function viewJobs() {
       <tr><th>Vídeo</th><th>Operação</th><th>Estado</th><th style="width:30%">Progresso</th></tr>
       ${jobs.map((j) => `<tr>
         <td><a href="#/video/${j.video_id}">${esc(j.title)}</a>
-          <div class="small muted">${esc(j.team_name)} · ${fmtDate(j.date)} vs ${esc(j.opponent)}</div></td>
+          <div class="small muted">${fmtDate(j.date)} vs ${esc(j.opponent)}</div></td>
         <td>${JOB_LABEL[j.type] || j.type}</td>
         <td>${STATUS_PILL[j.status]}${j.error ? `<div class="small" style="color:var(--err)">${esc(j.error)}</div>` : ''}</td>
         <td>${j.status === 'running' ? `<div class="progress"><div style="width:${j.progress * 100}%"></div></div>
@@ -905,17 +1024,8 @@ async function viewAdmin() {
         <td style="text-align:right;white-space:nowrap"><button class="primary" data-approve="${u.id}">Aprovar</button>
           <button class="danger" data-reject="${u.id}">Recusar</button></td></tr>`).join('')}
     </table></div>` : ''}
-    <h2>Equipas</h2>
-    <div class="panel stack">
-      <table>
-        <tr><th>Nome</th><th>Jogos</th><th>Vídeos</th><th>Espaço</th><th></th></tr>
-        ${teams.map((t) => `<tr><td>${esc(t.name)}</td><td>${t.games}</td><td>${t.videos}</td><td>${fmtBytes(t.bytes)}</td>
-          <td style="text-align:right;white-space:nowrap"><button data-rename-team="${t.id}">Renomear</button>
-          <button class="danger" data-del-team="${t.id}">Apagar</button></td></tr>`).join('')}
-      </table>
-      <form id="new-team" class="row"><input name="name" placeholder="Nova equipa (ex.: Seniores, Juniores, Iniciados…)" required style="flex:1">
-        <button class="primary">Adicionar equipa</button></form>
-    </div>
+    <p class="muted">${teams.reduce((n, t) => n + t.games, 0)} jogos · ${teams.reduce((n, t) => n + t.videos, 0)} vídeos ·
+      ${fmtBytes(teams.reduce((n, t) => n + t.bytes, 0))} ocupados</p>
 
     <h2>Utilizadores</h2>
     <div class="panel stack">
@@ -954,20 +1064,6 @@ async function viewAdmin() {
     const u = users.find((x) => x.id === Number(b.dataset.suspend));
     if (!await ask(`Suspender o acesso de ${u.name}? Deixa de poder entrar até voltares a aprovar a conta.`, { okLabel: 'Suspender' })) return;
     if (await attempt(() => api('PATCH', `/users/${u.id}`, { status: 'pending' }))) { toast('Acesso suspenso.'); route(); refreshJobsBadge(); }
-  });
-  document.getElementById('new-team').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (await attempt(() => api('POST', '/teams', Object.fromEntries(new FormData(e.target))))) { toast('Equipa criada.'); route(); }
-  });
-  $app.querySelectorAll('[data-rename-team]').forEach((b) => b.onclick = async () => {
-    const t = teams.find((x) => x.id === Number(b.dataset.renameTeam));
-    const name = await askText('Novo nome da equipa:', t.name);
-    if (name && await attempt(() => api('PATCH', `/teams/${t.id}`, { name }))) route();
-  });
-  $app.querySelectorAll('[data-del-team]').forEach((b) => b.onclick = async () => {
-    const t = teams.find((x) => x.id === Number(b.dataset.delTeam));
-    if (!await ask(`Apagar "${t.name}" com ${t.games} jogos e ${t.videos} vídeos? Não há volta atrás.`)) return;
-    if (await attempt(() => api('DELETE', `/teams/${t.id}`))) { toast('Equipa apagada.'); route(); }
   });
   document.getElementById('new-user').addEventListener('submit', async (e) => {
     e.preventDefault();

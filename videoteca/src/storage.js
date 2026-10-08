@@ -107,21 +107,12 @@ export function videoChanged(video, oldGameId) {
   })());
 }
 
-/** Depois de editar um jogo (data/adversário mudam o nome da pasta; a equipa muda o sítio). */
+/** Depois de editar um jogo (data/adversário mudam o nome da pasta). */
 export function gameChanged(gameId) {
   const folder = usingDrive && drive.getFolder(`game:${gameId}`);
   if (!folder) return;
   const game = db.prepare('SELECT * FROM games WHERE id = ?').get(gameId);
-  background((async () => {
-    const teamFolder = await drive.teamFolder(game.team_id);
-    const { parents = [] } = await drive.getFile(folder, 'parents');
-    const changes = { name: drive.gameFolderName(game) };
-    if (!parents.includes(teamFolder)) {
-      changes.addParents = teamFolder;
-      changes.removeParents = parents.join(',');
-    }
-    await drive.updateFile(folder, changes);
-  })());
+  background(drive.updateFile(folder, { name: drive.gameFolderName(game) }));
 }
 
 export function teamChanged(teamId, name) {

@@ -5,10 +5,13 @@ Plataforma web para guardar os vídeos dos jogos da equipa.
 - **Uploads de ficheiros pesados.** O browser envia os vídeos em blocos de 50 MB através do
   protocolo [tus](https://tus.io). Se a internet falhar, o envio retoma sozinho. Também se pode
   pausar e retomar, e um ficheiro escolhido de novo continua de onde parou.
-- **Etiqueta do jogo no upload.** Escolhe-se a equipa e o jogo (data + adversário). Se o jogo
-  ainda não existir, cria-se no próprio ecrã de upload.
-- **Biblioteca agrupada por equipa → jogo**, ordenada por data (ex.: *Seniores › 08/10/2026 vs ABC Braga*),
-  com pesquisa por adversário, competição ou data.
+- **Etiqueta do jogo no upload.** Escolhe-se o jogo (data + adversário). Se o jogo ainda não
+  existir, cria-se no próprio ecrã de upload. A equipa é sempre a sénior, por isso não se escolhe escalão.
+- **Biblioteca por jogo**, agrupada por mês (ex.: *08/10/2026 vs ABC Braga*), com pesquisa por
+  adversário, jogador, competição ou data.
+- **Jogadores nos clips.** Ao cortar um clip, o admin associa-lhe um ou mais jogadores, do
+  CDE Camões ou do adversário desse jogo. Escreve-se o nome ou o número, e os jogadores novos
+  são criados na hora. Na página **Jogadores**, cada jogador tem todos os seus clips de todos os jogos.
 - **Reprodução direta no browser e no telemóvel.** Pode-se saltar para qualquer minuto sem
   descarregar o jogo inteiro.
 - **Edição na plataforma para admins:**
@@ -19,12 +22,12 @@ Plataforma web para guardar os vídeos dos jogos da equipa.
   - 🗜 comprimir para 1080p / 720p / 480p (um jogo em 4K passa de dezenas de GB para poucos GB);
   - mudar o título, mudar o vídeo de jogo e apagar.
 - **Vídeos no disco do servidor ou no Google Drive.** Com o Google Drive, os vídeos ficam
-  organizados em pastas `Videoteca CDE Camões / Equipa / AAAA-MM-DD vs Adversário`. O servidor só
+  organizados em pastas `Videoteca CDE Camões / AAAA-MM-DD vs Adversário`. O servidor só
   precisa de espaço temporário.
 - **Acesso só com conta aprovada.** Qualquer pessoa pode pedir conta em "Pedir acesso", mas só
   entra e vê os vídeos depois de um administrador a aprovar (Administração → Pedidos de acesso).
   Os admins também podem suspender o acesso de alguém a qualquer momento.
-- **Perfis:** *Admin* edita, apaga e gere equipas e utilizadores. *Membro* vê, descarrega,
+- **Perfis:** *Admin* edita e apaga vídeos, associa jogadores e gere utilizadores. *Membro* vê, descarrega,
   carrega vídeos e cria jogos.
 
 ## Logo e cores do clube
@@ -68,9 +71,10 @@ docker compose up -d --build
 
 Abre `http://IP-DO-SERVIDOR:3000` e entra com o admin definido no `.env`. Depois:
 
-1. **Administração → Equipas**: cria as equipas (Seniores, Juniores, …).
-2. **Administração → Utilizadores**: cria contas para treinadores e jogadores (Membro ou Admin).
-3. **Carregar**: escolhe a equipa e o jogo (ou cria-o com a data e o adversário) e arrasta os vídeos.
+1. **Administração → Utilizadores**: cria contas para treinadores e jogadores (Membro ou Admin),
+   ou deixa-os pedir acesso e aprova os pedidos.
+2. **Carregar**: escolhe o jogo (ou cria-o com a data e o adversário) e arrasta os vídeos.
+3. **Jogadores**: opcionalmente, adiciona o plantel com os números das camisolas.
 
 Para guardar os vídeos noutro disco, muda o volume no `docker-compose.yml`, por exemplo
 `- /mnt/disco-videos:/data`.
@@ -121,7 +125,7 @@ Browser ──upload──▶ servidor (ffmpeg: converte, miniatura) ──▶ G
 Browser ◀──vídeo (Range)── servidor ◀──────────────────────── Google Drive
 ```
 
-- **Pastas:** `Videoteca CDE Camões / Seniores / 2026-10-08 vs ABC Braga / 1.ª parte.mp4`. Renomear
+- **Pastas:** `Videoteca CDE Camões / 2026-10-08 vs ABC Braga / 1.ª parte.mp4`. Renomear
   ou mudar vídeos e jogos na plataforma também muda no Drive.
 - **Apagar** na plataforma manda o ficheiro para a **reciclagem** do Drive, onde pode ser
   recuperado durante 30 dias.
@@ -212,11 +216,12 @@ Todas as rotas exigem sessão (cookie), exceto `POST /api/login`.
 
 | Método | Rota | Quem |
 |---|---|---|
-| `GET` | `/api/teams`, `/api/games?team_id=&q=`, `/api/games/:id` | todos |
+| `GET` | `/api/games?q=`, `/api/games/:id`, `/api/players`, `/api/players/:id` | todos |
 | `POST` | `/api/games` | todos |
 | `POST/PATCH/HEAD` | `/api/uploads[/:id]` (tus) | todos |
 | `GET` | `/api/videos/:id`, `/stream`, `/download`, `/thumb` | todos |
 | `POST` | `/api/videos/:id/edit` `{type: trim\|rotate\|mute\|compress, params}` | admin |
-| `PATCH/DELETE` | `/api/videos/:id`, `/api/games/:id`, `/api/teams/:id` | admin |
+| `PATCH/DELETE` | `/api/videos/:id`, `/api/games/:id`, `/api/players/:id` | admin |
+| `POST` | `/api/players`; `PUT /api/videos/:id/players` `{player_ids}` | admin |
 | `GET/POST/PATCH/DELETE` | `/api/users` | admin |
 | `GET` | `/api/jobs` | todos |

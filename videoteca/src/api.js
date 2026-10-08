@@ -1,6 +1,6 @@
 import express from 'express';
 import fs from 'node:fs';
-import { db, tx } from './db.js';
+import { db, tx, defaultTeamId } from './db.js';
 import {
   hashPassword, verifyPassword, createSession, destroySession, sessionCookie, requireAuth, requireAdmin,
 } from './auth.js';
@@ -140,7 +140,7 @@ api.delete('/teams/:id', requireAdmin, (req, res) => {
 
 function gameInput(body) {
   const game = {
-    team_id: Number(body?.team_id),
+    team_id: Number(body?.team_id) || defaultTeamId(),
     date: str(body?.date, 10),
     opponent: str(body?.opponent, 120),
     competition: str(body?.competition, 120),
@@ -158,9 +158,12 @@ api.get('/games', (req, res) => {
   const args = [];
   if (req.query.team_id) { where.push('g.team_id = ?'); args.push(Number(req.query.team_id)); }
   if (req.query.q) {
-    where.push("(g.opponent LIKE ? OR g.competition LIKE ? OR g.date LIKE ? OR EXISTS (SELECT 1 FROM videos v WHERE v.game_id = g.id AND v.title LIKE ?))");
+    where.push(`(g.opponent LIKE ? OR g.competition LIKE ? OR g.date LIKE ?
+      OR EXISTS (SELECT 1 FROM videos v WHERE v.game_id = g.id AND v.title LIKE ?)
+      OR EXISTS (SELECT 1 FROM videos v JOIN video_players vp ON vp.video_id = v.id JOIN players p ON p.id = vp.player_id
+                 WHERE v.game_id = g.id AND p.name LIKE ?))`);
     const q = `%${str(req.query.q, 100)}%`;
-    args.push(q, q, q, q);
+    args.push(q, q, q, q, q);
   }
   res.json(db.prepare(`
     SELECT g.*, t.name AS team_name,
@@ -181,6 +184,7 @@ api.get('/games/:id', (req, res) => {
            v.parent_id, v.created_at, v.updated_at, v.thumb IS NOT NULL AS has_thumb, u.name AS uploaded_by
     FROM videos v LEFT JOIN users u ON u.id = v.uploaded_by
     WHERE v.game_id = ? ORDER BY v.parent_id IS NOT NULL, v.created_at, v.id`).all(game.id);
+  attachPlayers(game.videos);
   game.jobs = db.prepare(`
     SELECT j.id, j.video_id, j.type, j.status, j.progress, j.error FROM jobs j JOIN videos v ON v.id = j.video_id
     WHERE v.game_id = ? AND (j.status IN ('queued', 'running') OR (j.status = 'error' AND j.finished_at > datetime('now', '-1 day')))
@@ -233,6 +237,7 @@ api.get('/videos/:id', (req, res) => {
   const { source_path, file, thumb, ...rest } = v;
   rest.jobs = db.prepare(`SELECT id, type, status, progress, error, params, created_at, finished_at
                           FROM jobs WHERE video_id = ? ORDER BY id DESC LIMIT 20`).all(v.id);
+  attachPlayers([rest]);
   res.json(rest);
 });
 
@@ -299,6 +304,7 @@ api.post('/videos/:id/edit', requireAdmin, (req, res) => {
           INSERT INTO videos (game_id, parent_id, title, original_name, status, uploaded_by)
           VALUES (?, ?, ?, ?, 'processing', ?)`).run(v.game_id, v.id, title, v.original_name, req.user.id);
         const clipId = Number(lastInsertRowid);
+        setVideoPlayers(clipId, params.playerIds);
         return { videoId: clipId, jobId: enqueueJob(clipId, 'trim', { ...clean, sourceVideoId: v.id }, req.user.id) };
       });
       return res.status(202).json(result);
@@ -307,6 +313,90 @@ api.post('/videos/:id/edit', requireAdmin, (req, res) => {
   }
   if (type === 'rotate' && ![90, 180, 270].includes(Number(params.degrees))) throw bad('Rotação inválida.');
   res.status(202).json({ videoId: v.id, jobId: enqueueJob(v.id, type, params, req.user.id) });
+});
+
+// ---------------------------------------------------------------------------
+// Jogadores: etiquetas nos clips (do nosso clube ou do adversário)
+// ---------------------------------------------------------------------------
+
+const PLAYER_COLS = `p.id, p.name, p.number, p.club`;
+
+function attachPlayers(videos) {
+  if (!videos.length) return;
+  const rows = db.prepare(`
+    SELECT vp.video_id, ${PLAYER_COLS} FROM video_players vp JOIN players p ON p.id = vp.player_id
+    WHERE vp.video_id IN (${videos.map(() => '?').join(',')}) ORDER BY p.club <> '', p.name`)
+    .all(...videos.map((v) => v.id));
+  for (const v of videos) {
+    v.players = rows.filter((r) => r.video_id === v.id).map(({ video_id, ...p }) => p);
+  }
+}
+
+function setVideoPlayers(videoId, ids) {
+  const valid = [...new Set((Array.isArray(ids) ? ids : []).map(Number))]
+    .filter((id) => db.prepare('SELECT 1 FROM players WHERE id = ?').get(id));
+  db.prepare('DELETE FROM video_players WHERE video_id = ?').run(videoId);
+  const ins = db.prepare('INSERT INTO video_players (video_id, player_id) VALUES (?, ?)');
+  for (const id of valid) ins.run(videoId, id);
+}
+
+function playerInput(body) {
+  const name = str(body?.name, 80);
+  if (!name) throw bad('Indica o nome do jogador.');
+  const number = body?.number === '' || body?.number == null ? null : Number(body.number);
+  if (number !== null && !(Number.isInteger(number) && number >= 0 && number <= 99)) throw bad('Número da camisola inválido (0–99).');
+  return { name, number, club: str(body?.club, 120) };
+}
+
+api.get('/players', (req, res) => {
+  res.json(db.prepare(`
+    SELECT ${PLAYER_COLS}, (SELECT COUNT(*) FROM video_players vp WHERE vp.player_id = p.id) AS clips
+    FROM players p ORDER BY p.club <> '', p.club, p.number IS NULL, p.number, p.name`).all());
+});
+
+api.get('/players/:id', (req, res) => {
+  const player = db.prepare(`SELECT ${PLAYER_COLS} FROM players p WHERE p.id = ?`).get(req.params.id);
+  if (!player) throw notFound('Jogador');
+  player.videos = db.prepare(`
+    SELECT v.id, v.title, v.status, v.duration, v.size, v.height, v.parent_id, v.updated_at, v.thumb IS NOT NULL AS has_thumb,
+           g.id AS game_id, g.date, g.opponent
+    FROM video_players vp JOIN videos v ON v.id = vp.video_id JOIN games g ON g.id = v.game_id
+    WHERE vp.player_id = ? ORDER BY g.date DESC, v.id`).all(player.id);
+  attachPlayers(player.videos);
+  res.json(player);
+});
+
+// Criar devolve o jogador existente se já houver um com o mesmo nome no mesmo clube.
+api.post('/players', requireAdmin, (req, res) => {
+  const p = playerInput(req.body);
+  const existing = db.prepare('SELECT id FROM players WHERE name = ? COLLATE NOCASE AND club = ?').get(p.name, p.club);
+  if (existing) return res.json({ id: existing.id, existing: true });
+  const { lastInsertRowid } = db.prepare('INSERT INTO players (name, number, club) VALUES (?, ?, ?)').run(p.name, p.number, p.club);
+  res.status(201).json({ id: Number(lastInsertRowid) });
+});
+
+api.patch('/players/:id', requireAdmin, (req, res) => {
+  const p = playerInput(req.body);
+  try {
+    const r = db.prepare('UPDATE players SET name = ?, number = ?, club = ? WHERE id = ?').run(p.name, p.number, p.club, req.params.id);
+    if (!r.changes) throw notFound('Jogador');
+  } catch (err) {
+    if (/UNIQUE/.test(err.message)) throw bad('Já existe um jogador com esse nome nesse clube.');
+    throw err;
+  }
+  res.json({ ok: true });
+});
+
+api.delete('/players/:id', requireAdmin, (req, res) => {
+  const r = db.prepare('DELETE FROM players WHERE id = ?').run(req.params.id);
+  if (!r.changes) throw notFound('Jogador');
+  res.json({ ok: true });
+});
+
+api.put('/videos/:id/players', requireAdmin, (req, res) => {
+  const v = loadVideo(req.params.id);
+  setVideoPlayers(v.id, req.body?.player_ids);
+  res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------
