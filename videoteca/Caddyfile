@@ -1,0 +1,10 @@
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy videoteca:3000 {
+		# Uploads grandes: sem timeouts curtos.
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+}

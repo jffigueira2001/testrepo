@@ -1,0 +1,23 @@
+{
+  "name": "videoteca-andebol",
+  "version": "1.0.0",
+  "description": "Videoteca de jogos de andebol: upload de vídeos pesados, biblioteca por equipa/jogo e edição para admins",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "drive:auth": "node scripts/drive-auth.js"
+  },
+  "dependencies": {
+    "@tus/file-store": "^2.1.1",
+    "@tus/server": "^2.4.5",
+    "express": "^5.2.1",
+    "tus-js-client": "^4.3.1"
+  }
+}

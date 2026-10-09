@@ -1,0 +1,42 @@
+services:
+  videoteca:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      # Onde ficam os vídeos. Aponta para um disco grande (ex.: /mnt/disco-videos:/data).
+      - ./data:/data
+    ports:
+      - "3000:3000"
+
+  # HTTPS automático (Let's Encrypt). Ativar com: docker compose --profile https up -d
+  # Requer um domínio a apontar para o servidor e as portas 80/443 abertas.
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - videoteca
+
+  # Link público sem abrir portas no router (Cloudflare Tunnel).
+  # Ativar com: docker compose --profile tunnel up -d   (requer TUNNEL_TOKEN no .env)
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:-}
+    depends_on:
+      - videoteca
+
+volumes:
+  caddy_data:
