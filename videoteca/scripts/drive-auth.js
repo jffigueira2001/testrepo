@@ -9,8 +9,9 @@ if (!clientId || !clientSecret) {
   process.exit(1);
 }
 
-// drive.file: a app só vê os ficheiros e pastas que ela própria cria — não o resto do Drive.
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+// drive: acesso ao Drive para ler os vídeos que pões na pasta (ex.: "Camões") e guardar lá os novos.
+// Com DRIVE_SCOPE=drive.file a app só vê o que ela própria cria (sem importação da pasta).
+const SCOPE = `https://www.googleapis.com/auth/${process.env.DRIVE_SCOPE || 'drive'}`;
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, redirectUri());
@@ -31,7 +32,8 @@ const server = http.createServer(async (req, res) => {
     console.log('STORAGE=drive');
     console.log(`GOOGLE_CLIENT_ID=${clientId}`);
     console.log(`GOOGLE_CLIENT_SECRET=${clientSecret}`);
-    console.log(`GOOGLE_REFRESH_TOKEN=${data.refresh_token}\n`);
+    console.log(`GOOGLE_REFRESH_TOKEN=${data.refresh_token}`);
+    console.log('DRIVE_FOLDER_ID=<id da pasta, ex.: "Camões" — a última parte do endereço da pasta no Drive>\n');
   }
   server.close();
 });

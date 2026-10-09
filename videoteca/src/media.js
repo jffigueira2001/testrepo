@@ -30,15 +30,18 @@ function run(cmd, args, { onStdout } = {}) {
   });
 }
 
-export async function probe(file) {
-  const out = await run('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file]);
+/** Analisa um ficheiro local, ou uma entrada já preparada (ex.: URL do Drive com autenticação). */
+export async function probe(file, inputArgs = null) {
+  const out = await run('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams',
+    ...(inputArgs ? inputArgs.filter((a) => a !== '-i') : [file])]);
   const info = JSON.parse(out);
   const video = info.streams.find((s) => s.codec_type === 'video');
   const audio = info.streams.find((s) => s.codec_type === 'audio');
   if (!video) throw new Error('O ficheiro não contém uma faixa de vídeo.');
   return {
     duration: Number(info.format.duration) || Number(video.duration) || 0,
-    size: Number(info.format.size) || fs.statSync(file).size,
+    size: Number(info.format.size) || (file ? fs.statSync(file).size : 0),
+    container: info.format.format_name || '',
     width: video.width || 0,
     height: video.height || 0,
     vcodec: video.codec_name,
@@ -78,10 +81,10 @@ function h264Args(extraVideoFilters = []) {
 const AAC = ['-c:a', 'aac', '-b:a', '128k'];
 const FASTSTART = ['-movflags', '+faststart'];
 
-async function makeThumbnail(videoFile, duration, thumbName) {
+async function makeThumbnail(inputArgs, duration, thumbName) {
   const at = duration > 0 ? Math.min(duration * 0.1, 60) : 0;
   const out = path.join(config.thumbsDir, thumbName);
-  await run('ffmpeg', ['-hide_banner', '-y', '-ss', String(at), '-i', videoFile,
+  await run('ffmpeg', ['-hide_banner', '-y', '-ss', String(at), ...inputArgs,
     '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '4', out]);
   return thumbName;
 }
@@ -198,7 +201,7 @@ async function concat(video, params, onProgress) {
   try {
     for (const src of sources) inputs.push(await storage.openInput(src.file));
     const files = inputs.map((i) => i.args[i.args.length - 1]);
-    const infos = await Promise.all(files.map(probe));
+    const infos = await Promise.all(files.map((f) => probe(f)));
     const total = infos.reduce((s, i) => s + i.duration, 0);
     const outName = newName(video.id, 'mp4');
     const out = path.join(config.videosDir, outName);
@@ -245,7 +248,33 @@ async function concat(video, params, onProgress) {
   }
 }
 
-const OPERATIONS = { ingest, trim, rotate, mute, compress, concat };
+const browserFriendly = (info) => info.vcodec === 'h264' && ['yuv420p', 'yuvj420p'].includes(info.pixFmt)
+  && (!info.acodec || ['aac', 'mp3'].includes(info.acodec)) && /mp4|mov/.test(info.container);
+
+/**
+ * Importa um vídeo que já está na pasta do Google Drive.
+ * Se o browser o consegue reproduzir (H.264/AAC em MP4/MOV, o normal em câmaras e telemóveis Android),
+ * fica ligado ao ficheiro original, sem cópia. Caso contrário (ex.: HEVC do iPhone, .mts) é convertido
+ * e a versão convertida é guardada na pasta do jogo; o original fica intacto.
+ */
+async function importDrive(video, params, onProgress) {
+  const ref = `drivelink:${params.fileId}`;
+  const remote = await storage.openInput(ref, { partial: true });
+  const info = await probe(null, remote.args);
+  if (browserFriendly(info)) return { ref, inputArgs: remote.args, info };
+
+  const full = await storage.openInput(ref);
+  try {
+    const outName = newName(video.id, 'mp4');
+    await ffmpeg([...full.args, '-map', '0:v:0', '-map', '0:a:0?', ...h264Args(), ...AAC, ...FASTSTART,
+      path.join(config.videosDir, outName)], info.duration, onProgress);
+    return { outName };
+  } finally {
+    full.cleanup();
+  }
+}
+
+const OPERATIONS = { ingest, trim, rotate, mute, compress, concat, import: importDrive };
 export const EDIT_TYPES = ['trim', 'rotate', 'mute', 'compress'];
 
 // ---------------------------------------------------------------------------
@@ -296,15 +325,23 @@ async function runJob(job) {
   let thumb = null;
   try {
     if (!sourceVideo) throw new Error('Vídeo de origem já não existe.');
-    if (!['ingest', 'concat'].includes(job.type) && !sourceVideo.file) throw new Error('O vídeo ainda não está pronto.');
+    if (!['ingest', 'concat', 'import'].includes(job.type) && !sourceVideo.file) throw new Error('O vídeo ainda não está pronto.');
     const result = await OPERATIONS[job.type](video, params, onProgress, sourceVideo);
-    out = path.join(config.videosDir, result.outName);
-    const info = await probe(out);
-    thumb = await makeThumbnail(out, info.duration, newName(video.id, 'jpg'));
-
-    // Com o Google Drive, envia o ficheiro final (e apaga a cópia local).
-    const ref = await storage.store(out, getVideo(video.id) || video);
-    out = null;
+    let info;
+    let ref;
+    if (result.ref) {
+      // Ligado a um ficheiro existente (importação sem cópia).
+      info = result.info;
+      thumb = await makeThumbnail(result.inputArgs, info.duration, newName(video.id, 'jpg'));
+      ref = result.ref;
+    } else {
+      out = path.join(config.videosDir, result.outName);
+      info = await probe(out);
+      thumb = await makeThumbnail(['-i', out], info.duration, newName(video.id, 'jpg'));
+      // Com o Google Drive, envia o ficheiro final (e apaga a cópia local).
+      ref = await storage.store(out, getVideo(video.id) || video);
+      out = null;
+    }
 
     const current = getVideo(video.id);
     if (!current) { // apagado durante o processamento

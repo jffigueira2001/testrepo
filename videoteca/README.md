@@ -121,6 +121,28 @@ público conta para isso. Para uso pequeno e privado é uma zona cinzenta. Como 
 permanente, prefere abrir as portas 80/443 com o Caddy (secção anterior), por exemplo com um
 subdomínio gratuito do [DuckDNS](https://www.duckdns.org).
 
+## Usar uma pasta do teu Google Drive (ex.: "Camões")
+
+Com `STORAGE=drive` e `DRIVE_FOLDER_ID` a apontar para uma pasta tua:
+
+- **Vídeos que pões na pasta** (pela app do Google Drive no telemóvel ou no PC) aparecem em
+  **Carregar → Na pasta "Camões" do Google Drive**. O admin escolhe o jogo e importa. O jogo é
+  sugerido a partir do nome: uma subpasta `2026-10-08 vs ABC Braga` ou um ficheiro `VID_20261008_….mp4`.
+  - **MP4/MOV em H.264** (câmaras e Android): ficam ligados ao ficheiro original, sem cópia nem espaço extra.
+  - **Outros formatos** (ex.: HEVC do iPhone, `.mts`): são convertidos. A versão convertida é guardada
+    na pasta do jogo, dentro de "Camões", e o original fica intacto.
+  - A plataforma **nunca apaga, renomeia nem move os teus ficheiros originais**. Apagar um vídeo na
+    plataforma só o tira da biblioteca, e ele volta a aparecer para importar.
+  - "Ignorar este ficheiro" esconde-o da lista.
+- **Vídeos carregados pelo site, clips e vídeos juntados** são guardados em `Camões / AAAA-MM-DD vs Adversário /`.
+
+O ID da pasta é a última parte do endereço quando a abres no Drive:
+`https://drive.google.com/drive/folders/<ID>` → `DRIVE_FOLDER_ID=<ID>`
+
+Para isto, a autorização (`npm run drive:auth`) pede acesso ao Drive (âmbito `drive`). Sem acesso a
+todo o Drive, a plataforma não conseguiria ler os ficheiros que lá pões. Se preferires que só veja o que
+ela própria cria, usa `DRIVE_SCOPE=drive.file npm run drive:auth`. Nesse caso não há importação da pasta.
+
 ## Guardar os vídeos no Google Drive
 
 Com `STORAGE=drive`, cada vídeo é enviado para o Google Drive da conta do clube depois de
@@ -137,7 +159,8 @@ Browser ◀──vídeo (Range)── servidor ◀──────────
   recuperado durante 30 dias.
 - **Edições:** os cortes até 20 minutos leem só o pedaço necessário do Drive. As outras edições
   descarregam o vídeo, processam-no e enviam a nova versão.
-- **Acesso da app ao Drive:** só vê os ficheiros que ela própria cria (permissão `drive.file`), não o resto do Drive.
+- **Acesso da app ao Drive:** com o âmbito `drive` (por omissão), lê a pasta escolhida para importar vídeos.
+  Com `drive.file`, só vê os ficheiros que ela própria cria.
 - **Espaço no servidor:** chega um disco com espaço livre para cerca de 3× o maior vídeo
   (ex.: 30–40 GB para jogos de 10 GB), usado durante o upload e as edições.
 - **Internet do servidor:** quem vê um vídeo recebe-o através do servidor. A velocidade de envio
@@ -153,7 +176,7 @@ Browser ◀──vídeo (Range)── servidor ◀──────────
    2. Em **APIs e serviços → Biblioteca**, ativa a **Google Drive API**.
    3. Em **Ecrã de consentimento OAuth** (ou "Google Auth Platform"):
       - escolhe o tipo *Externo*, preenche o nome e o email;
-      - em *Âmbitos*, adiciona `.../auth/drive.file`;
+      - em *Âmbitos*, adiciona `.../auth/drive` (ou `.../auth/drive.file` se não quiseres importar da pasta);
       - em *Público*, carrega em **Publicar app** ("Em produção").
       Se ficar em modo de teste, a ligação expira ao fim de 7 dias.
    4. Em **Credenciais → Criar credenciais → ID de cliente OAuth**, escolhe o tipo **App para
@@ -204,7 +227,8 @@ npm test
 | `TRUST_PROXY`    | `0`                      | Nº de proxies reversos à frente (ex.: `1` com Caddy) |
 | `STORAGE`        | `local`                  | `local` (disco) ou `drive` (Google Drive) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` | — | Credenciais do Drive (`npm run drive:auth`) |
-| `DRIVE_FOLDER_NAME` | `Videoteca CDE Camões`   | Nome da pasta raiz criada no Drive |
+| `DRIVE_FOLDER_ID` | —                       | Pasta do Drive a usar (ex.: "Camões"). Sem ela, a plataforma cria a sua |
+| `DRIVE_FOLDER_NAME` | `Videoteca CDE Camões`   | Nome da pasta criada quando não há `DRIVE_FOLDER_ID` |
 
 ## Cópias de segurança
 

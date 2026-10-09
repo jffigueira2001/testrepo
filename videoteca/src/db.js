@@ -104,6 +104,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS video_players_player ON video_players(player_id);
 `);
 
+// Ficheiros da pasta do Drive já importados (ou ignorados), para não voltarem a aparecer como novos.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS drive_imports (
+    file_id  TEXT PRIMARY KEY,
+    video_id INTEGER REFERENCES videos(id) ON DELETE CASCADE,
+    ignored  INTEGER NOT NULL DEFAULT 0
+  );
+`);
+
 /**
  * O clube só tem uma equipa (seniores). A tabela teams mantém-se por compatibilidade,
  * mas a interface já não pede o escalão: todos os jogos ficam nesta equipa.

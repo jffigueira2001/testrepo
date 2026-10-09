@@ -38,6 +38,13 @@ export function startFakeDrive() {
       res.writeHead(200, { Location: `http://127.0.0.1:${server.address().port}/session/${sid}` });
       return res.end();
     }
+    if (url.pathname === '/drive/v3/files' && req.method === 'GET') {
+      const m = String(url.searchParams.get('q')).match(/'([^']+)' in parents and trashed = false/);
+      if (!m) return json(400, { error: { message: 'q não suportado' } });
+      const list = [...files.values()].filter((f) => f.parents?.includes(m[1]) && !f.trashed)
+        .map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, size: f.data ? String(f.data.length) : undefined }));
+      return json(200, { files: list });
+    }
     if (url.pathname === '/drive/v3/files' && req.method === 'POST') {
       const meta = JSON.parse(body);
       const id = `d${++seq}`;
@@ -69,13 +76,20 @@ export function startFakeDrive() {
         res.writeHead(206, { 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Type': 'video/mp4' });
         return res.end(f.data.subarray(start, end + 1));
       }
-      return json(200, { id: f.id, name: f.name, parents: f.parents, size: String(f.data?.length || 0) });
+      return json(200, { id: f.id, name: f.name, parents: f.parents, trashed: f.trashed, size: String(f.data?.length || 0) });
     }
     json(404, { error: { message: `rota desconhecida ${req.method} ${url.pathname}` } });
   });
 
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({
     url: `http://127.0.0.1:${server.address().port}`, files, stats, close: () => server.close(),
+    /** Simula um ficheiro/pasta posto diretamente no Drive pelo utilizador (sem passar pela plataforma). */
+    add({ name, parent = 'root', data = null, mimeType }) {
+      const id = `u${++seq}`;
+      files.set(id, { id, name, parents: [parent], trashed: false, data,
+        mimeType: mimeType || (data ? 'video/mp4' : 'application/vnd.google-apps.folder') });
+      return id;
+    },
     /** Caminho legível de um ficheiro: "Videoteca Andebol/Seniores/2026-10-08 vs ABC/x.mp4" */
     pathOf(id) {
       const parts = [];

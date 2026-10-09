@@ -152,6 +152,40 @@ export function download(id, { range, signal } = {}) {
 
 export const mediaUrl = (id) => `${api(`/${id}`)}?alt=media`;
 
+const VIDEO_EXT = /\.(mp4|m4v|mov|mts|m2ts|mkv|avi|wmv|webm|3gp)$/i;
+
+/**
+ * Vídeos dentro de uma pasta e das suas subpastas (até 3 níveis), excluindo os que estão na reciclagem.
+ * Cada vídeo traz o caminho das pastas (ex.: "2026-10-08 vs ABC Braga") para sugerir o jogo.
+ */
+export async function listVideos(folderId, { depth = 3, path = '' } = {}) {
+  const out = [];
+  let pageToken;
+  do {
+    const page = await request('GET', api(''), {
+      query: {
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: 'nextPageToken,files(id,name,mimeType,size,modifiedTime,videoMediaMetadata(durationMillis,width,height))',
+        pageSize: '1000',
+        pageToken,
+      },
+    });
+    for (const f of page.files || []) {
+      if (f.mimeType === FOLDER) {
+        if (depth > 0) out.push(...await listVideos(f.id, { depth: depth - 1, path: path ? `${path} / ${f.name}` : f.name }));
+      } else if (f.mimeType?.startsWith('video/') || VIDEO_EXT.test(f.name)) {
+        out.push({
+          id: f.id, name: f.name, path, size: Number(f.size) || 0, modifiedTime: f.modifiedTime,
+          duration: Number(f.videoMediaMetadata?.durationMillis) / 1000 || 0,
+          width: f.videoMediaMetadata?.width || 0, height: f.videoMediaMetadata?.height || 0,
+        });
+      }
+    }
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Pastas: Videoteca / <Equipa> / <AAAA-MM-DD vs Adversário>
 // Os IDs ficam guardados na tabela drive_folders para não repetir pesquisas.

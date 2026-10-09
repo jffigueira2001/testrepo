@@ -6,7 +6,7 @@ import {
 } from './auth.js';
 import { enqueueJob, EDIT_TYPES, thumbPath, deleteVideoFiles } from './media.js';
 import * as storage from './storage.js';
-import { forgetFolder } from './drive.js';
+import { forgetFolder, listVideos, rootFolder, getFile } from './drive.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '100kb' }));
@@ -341,6 +341,75 @@ api.post('/videos/concat', requireAdmin, (req, res) => {
     return { videoId, jobId: enqueueJob(videoId, 'concat', { sourceIds: ids }, req.user.id) };
   });
   res.status(202).json(result);
+});
+
+// ---------------------------------------------------------------------------
+// Importar vídeos que já estão na pasta do Google Drive (ex.: "Camões")
+// ---------------------------------------------------------------------------
+
+/** Tenta perceber a data e o adversário pelo nome da pasta/ficheiro (ex.: "2026-10-08 vs ABC Braga"). */
+export function suggestGame(text) {
+  const t = String(text);
+  let date = null;
+  let m = t.match(/(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})/) || t.match(/(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/);
+  if (m) date = [m[1], m[2], m[3]];
+  else if ((m = t.match(/(?<!\d)(\d{1,2})[-_./](\d{1,2})[-_./](20\d{2})(?!\d)/))) date = [m[3], m[2], m[1]];
+  const iso = date && `${date[0]}-${date[1].padStart(2, '0')}-${date[2].padStart(2, '0')}`;
+  const opp = t.match(/\bvs\.?\s+([^/\\()[\]]+?)\s*(?:[-–_(\[/]|\.\w{2,4}$|$)/i);
+  return { date: iso && isDate(iso) ? iso : null, opponent: opp ? opp[1].trim() : null };
+}
+
+const requireDrive = (_req, _res, next) => next(storage.usingDrive ? undefined
+  : bad('O Google Drive não está ligado (STORAGE=drive). Vê o README.'));
+
+api.get('/drive/videos', requireAdmin, async (_req, res) => {
+  if (!storage.usingDrive) return res.json({ enabled: false, files: [] });
+  const root = await rootFolder();
+  const folder = await getFile(root, 'id,name');
+  const known = new Set(db.prepare('SELECT file_id FROM drive_imports').all().map((r) => r.file_id));
+  for (const { file } of db.prepare("SELECT file FROM videos WHERE file LIKE 'drive%'").all()) known.add(file.split(':')[1]);
+  const games = db.prepare('SELECT id, date, opponent FROM games').all();
+  const files = (await listVideos(root)).filter((f) => !known.has(f.id)).map((f) => {
+    const s = suggestGame(`${f.path} / ${f.name}`);
+    const sameDay = games.filter((g) => g.date === s.date);
+    const match = sameDay.find((g) => s.opponent && g.opponent.toLowerCase() === s.opponent.toLowerCase())
+      || (sameDay.length === 1 && !s.opponent ? sameDay[0] : null);
+    return { ...f, suggestion: { ...s, game_id: match?.id ?? null } };
+  });
+  res.json({ enabled: true, folder: folder.name, files });
+});
+
+api.post('/drive/import', requireAdmin, requireDrive, async (req, res) => {
+  const fileId = str(req.body?.file_id, 200);
+  if (!fileId) throw bad('Falta o ficheiro.');
+  if (db.prepare('SELECT 1 FROM drive_imports WHERE file_id = ? AND video_id IS NOT NULL').get(fileId)) throw bad('Este ficheiro já foi importado.');
+  const file = await getFile(fileId, 'id,name,trashed').catch(() => null);
+  if (!file || file.trashed) throw bad('Ficheiro não encontrado no Google Drive.');
+
+  const result = tx(() => {
+    let gameId = Number(req.body?.game_id);
+    if (!gameId) {
+      const g = gameInput(req.body?.game || {});
+      const existing = db.prepare('SELECT id FROM games WHERE team_id = ? AND date = ? AND opponent = ? COLLATE NOCASE').get(g.team_id, g.date, g.opponent);
+      gameId = existing?.id ?? Number(db.prepare('INSERT INTO games (team_id, date, opponent, competition, venue, notes) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(g.team_id, g.date, g.opponent, g.competition, g.venue, g.notes).lastInsertRowid);
+    } else if (!db.prepare('SELECT 1 FROM games WHERE id = ?').get(gameId)) {
+      throw bad('Jogo inválido.');
+    }
+    const title = str(req.body?.title, 200) || file.name.replace(/\.[^.]+$/, '');
+    const videoId = Number(db.prepare(`INSERT INTO videos (game_id, title, original_name, status, uploaded_by)
+      VALUES (?, ?, ?, 'processing', ?)`).run(gameId, title, file.name, req.user.id).lastInsertRowid);
+    db.prepare('INSERT OR REPLACE INTO drive_imports (file_id, video_id, ignored) VALUES (?, ?, 0)').run(fileId, videoId);
+    return { videoId, gameId, jobId: enqueueJob(videoId, 'import', { fileId }, req.user.id) };
+  });
+  res.status(202).json(result);
+});
+
+api.post('/drive/ignore', requireAdmin, (req, res) => {
+  const fileId = str(req.body?.file_id, 200);
+  if (!fileId) throw bad('Falta o ficheiro.');
+  db.prepare('INSERT OR REPLACE INTO drive_imports (file_id, video_id, ignored) VALUES (?, NULL, 1)').run(fileId);
+  res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------

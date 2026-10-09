@@ -47,7 +47,7 @@ function fmtBytes(n) {
 const today = () => new Date().toISOString().slice(0, 10);
 const CLUB = 'CDE Camões';
 const VENUE = { casa: 'Casa', fora: 'Fora', neutro: 'Neutro' };
-const JOB_LABEL = { ingest: 'Processar upload', trim: 'Cortar', rotate: 'Rodar', mute: 'Remover som', compress: 'Comprimir', concat: 'Juntar vídeos' };
+const JOB_LABEL = { import: 'Importar do Drive', ingest: 'Processar upload', trim: 'Cortar', rotate: 'Rodar', mute: 'Remover som', compress: 'Comprimir', concat: 'Juntar vídeos' };
 const STATUS_PILL = {
   processing: '<span class="pill warn">a processar</span>',
   ready: '<span class="pill ok">pronto</span>',
@@ -1099,9 +1099,12 @@ async function viewUpload(presetGameId) {
 
   $app.innerHTML = `
     <h1>Carregar vídeos</h1>
-    <p class="muted">Os vídeos são enviados em blocos: se a internet falhar o envio continua sozinho, e podes pausar e retomar.
-      Não feches o separador até terminar (podes navegar na aplicação).</p>
+    <p class="muted">Importa os vídeos da pasta do Google Drive ou carrega-os diretamente deste dispositivo.</p>
+    <div id="drive-import"></div>
     <div class="panel stack">
+      <strong>⬆ Carregar deste dispositivo</strong>
+      <p class="small muted" style="margin:0">Os vídeos são enviados em blocos: se a internet falhar o envio continua sozinho,
+        e podes pausar e retomar. Não feches o separador até terminar (podes navegar na aplicação).</p>
       <strong>1. A que jogo pertence?</strong>
       <div><label for="u-game">Jogo</label><select id="u-game"></select></div>
       <form id="new-game" class="stack" hidden>
@@ -1189,6 +1192,74 @@ async function viewUpload(presetGameId) {
 
   renderUploads();
   every(1000, () => { if (state.uploads.some((u) => u.status === 'uploading')) renderUploads(); });
+  renderDriveImport(document.getElementById('drive-import'), games);
+}
+
+/** Vídeos postos diretamente na pasta do Google Drive, à espera de serem importados. */
+async function renderDriveImport(el, games) {
+  el.innerHTML = '<div class="panel small muted">A procurar vídeos novos na pasta do Google Drive…</div>';
+  let data;
+  try {
+    data = await api('GET', '/drive/videos');
+  } catch (err) {
+    el.innerHTML = `<div class="panel small" style="color:var(--err)">Não foi possível ler a pasta do Google Drive: ${esc(err.message)}</div>`;
+    return;
+  }
+  if (!data.enabled) { el.innerHTML = ''; return; }
+
+  const gameOptions = (sel) => `<option value="new">➕ Novo jogo…</option>${games.map((g) =>
+    `<option value="${g.id}" ${g.id === sel ? 'selected' : ''}>${fmtDate(g.date)} vs ${esc(g.opponent)}</option>`).join('')}`;
+
+  el.innerHTML = `
+    <div class="panel stack drive-import">
+      <div class="row spread">
+        <strong>📁 Na pasta "${esc(data.folder)}" do Google Drive</strong>
+        <button type="button" id="drive-refresh">↻ Procurar novos</button>
+      </div>
+      <p class="small muted">Põe os vídeos nessa pasta (por exemplo com a app do Google Drive no telemóvel ou no computador)
+        e importa-os aqui. Os ficheiros originais ficam onde estão. Uma subpasta como "2026-10-08 vs ABC Braga" ajuda a sugerir o jogo.</p>
+      ${data.files.length ? data.files.map((f, i) => `
+        <form class="drive-file" data-i="${i}">
+          <div class="drive-file-head">
+            <div class="join-text"><div class="join-title">🎬 ${esc(f.name)}</div>
+              <div class="small muted">${f.path ? `${esc(f.path)} · ` : ''}${fmtBytes(f.size)}${f.duration ? ` · ${fmtDuration(f.duration)}` : ''}</div></div>
+          </div>
+          <div class="grid-form">
+            <div><label for="di-game-${i}">Jogo</label><select id="di-game-${i}" name="game_id">${gameOptions(f.suggestion.game_id)}</select></div>
+            <div data-new><label for="di-date-${i}">Data do jogo</label><input id="di-date-${i}" name="date" type="date" value="${esc(f.suggestion.date || today())}"></div>
+            <div data-new><label for="di-opp-${i}">Adversário</label><input id="di-opp-${i}" name="opponent" value="${esc(f.suggestion.opponent || '')}" placeholder="ex.: ABC Braga"></div>
+            <div><label for="di-title-${i}">Título</label><input id="di-title-${i}" name="title" value="${esc(f.name.replace(/\.[^.]+$/, ''))}"></div>
+          </div>
+          <div class="row">
+            <button class="primary">Importar</button>
+            <button type="button" data-ignore class="link">Ignorar este ficheiro</button>
+          </div>
+        </form>`).join('') : '<div class="small muted">Não há vídeos novos na pasta.</div>'}
+    </div>`;
+
+  document.getElementById('drive-refresh').onclick = () => renderDriveImport(el, games);
+  el.querySelectorAll('.drive-file').forEach((form) => {
+    const f = data.files[Number(form.dataset.i)];
+    const $game = form.querySelector('[name=game_id]');
+    const toggle = () => form.querySelectorAll('[data-new]').forEach((d) => { d.hidden = $game.value !== 'new'; });
+    $game.onchange = toggle;
+    toggle();
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = Object.fromEntries(new FormData(form));
+      if (fd.game_id === 'new' && (!fd.date || !fd.opponent.trim())) return toast('Indica a data e o adversário do jogo.', true);
+      const body = { file_id: f.id, title: fd.title,
+        ...(fd.game_id === 'new' ? { game: { date: fd.date, opponent: fd.opponent } } : { game_id: Number(fd.game_id) }) };
+      const r = await attempt(() => api('POST', '/drive/import', body));
+      if (!r) return;
+      toast('A importar. O vídeo aparece no jogo quando estiver pronto.');
+      form.remove();
+      refreshJobsBadge();
+    });
+    form.querySelector('[data-ignore]').onclick = async () => {
+      if (await attempt(() => api('POST', '/drive/ignore', { file_id: f.id }))) form.remove();
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

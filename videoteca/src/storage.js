@@ -1,5 +1,9 @@
 // Armazenamento dos vídeos finais: disco local ou Google Drive.
-// Na base de dados, videos.file guarda uma referência: "nome.mp4" (local) ou "drive:<id>" (Drive).
+// Na base de dados, videos.file guarda uma referência:
+//   "nome.mp4"          ficheiro local (STORAGE=local)
+//   "drive:<id>"        ficheiro criado pela plataforma no Google Drive
+//   "drivelink:<id>"    vídeo que já estava na pasta do Drive e foi importado sem cópia.
+//                       A plataforma nunca o apaga, renomeia nem move: o original é teu.
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -9,7 +13,8 @@ import { db } from './db.js';
 import * as drive from './drive.js';
 
 export const usingDrive = config.storage === 'drive';
-const driveId = (ref) => (ref?.startsWith('drive:') ? ref.slice(6) : null);
+const driveId = (ref) => (ref?.startsWith('drive:') ? ref.slice(6) : ref?.startsWith('drivelink:') ? ref.slice(10) : null);
+export const isLinked = (ref) => !!ref?.startsWith('drivelink:');
 
 const safeName = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '_').trim() || 'video';
 const driveName = (video) => `${safeName(video.title)}.mp4`;
@@ -23,7 +28,7 @@ export async function store(localPath, video) {
 }
 
 export async function remove(ref) {
-  if (!ref) return;
+  if (!ref || isLinked(ref)) return;
   const id = driveId(ref);
   if (id) await drive.trash(id);
   else fs.rmSync(path.join(config.videosDir, ref), { force: true });
@@ -96,7 +101,7 @@ function background(promise) {
 /** Depois de mudar o título ou o jogo de um vídeo. */
 export function videoChanged(video, oldGameId) {
   const id = driveId(video.file);
-  if (!id) return;
+  if (!id || isLinked(video.file)) return;
   background((async () => {
     const changes = { name: driveName(video) };
     if (oldGameId !== video.game_id) {
